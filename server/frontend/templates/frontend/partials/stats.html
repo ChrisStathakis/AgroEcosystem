@@ -1,0 +1,5 @@
+<div class="row g-3 mb-4">
+  <div class="col-sm-4"><div class="panel stat"><div class="stat-label">Total income <span class="float-end positive" aria-hidden="true">↙</span></div><div class="stat-value">{{ summary.income_total|floatformat:'2g' }}</div><div class="stat-note">Recorded in {{ summary.year }}</div></div></div>
+  <div class="col-sm-4"><div class="panel stat"><div class="stat-label">Total expenses <span class="float-end negative" aria-hidden="true">↗</span></div><div class="stat-value">{{ summary.expense_total|floatformat:'2g' }}</div><div class="stat-note">Recorded in {{ summary.year }}</div></div></div>
+  <div class="col-sm-4"><div class="panel stat stat-featured"><div class="stat-label">Net balance <span class="float-end" aria-hidden="true">≈</span></div><div class="stat-value">{{ summary.balance|floatformat:'2g' }}</div><div class="stat-note">Income minus expenses · {{ summary.year }}</div></div></div>
+</div>

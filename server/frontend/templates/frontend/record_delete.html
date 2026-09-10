@@ -1,0 +1,7 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Delete {{ spec.singular }}{% endblock %}
+{% block breadcrumb %}{{ spec.title }}{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'record-list' resource %}">← Back to {{ spec.title|lower }}</a>
+<div class="row justify-content-center mt-4"><div class="col-lg-8 col-xl-6"><section class="panel form-panel"><span class="pill pill-warm mb-3">CONFIRM DELETION</span><h1 class="h3">Delete this {{ spec.singular }}?</h1><p class="text-secondary">You are about to delete <strong class="text-dark">{{ record }}</strong>.</p>{% if blocked %}<div class="alert alert-warning" role="alert">This {{ spec.singular }} is used by existing transactions and cannot be deleted. Update those transactions first, or keep this record for your history.</div><a class="btn btn-outline-secondary" href="{% url 'record-list' resource %}">Back to {{ spec.title|lower }}</a>{% else %}<p class="small text-secondary">This action cannot be undone. Review the record before continuing.</p><form method="post" class="form-actions">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete {{ spec.singular }}</button><a class="btn btn-outline-secondary" href="{% url 'record-list' resource %}">Keep record</a></form>{% endif %}</section></div></div>
+{% endblock %}

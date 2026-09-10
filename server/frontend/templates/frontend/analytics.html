@@ -1,0 +1,34 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Analytics{% endblock %}
+{% block breadcrumb %}Analytics{% endblock %}
+{% block content %}
+<div class="page-header"><div><div class="eyebrow mb-2">KNOW YOUR NUMBERS</div><h1>Your year, in perspective.</h1><p>Income, expenses, and the space between. Calendar year {{ summary.year }}.</p></div><span class="pill">January–December {{ summary.year }}</span></div>
+{% include 'frontend/partials/stats.html' %}
+<section class="panel mb-4" aria-labelledby="tax-position-heading"><div class="panel-heading"><div><h2 id="tax-position-heading">Tax position</h2><p>Based on records flagged for tax in {{ summary.year }}</p></div><span class="pill">For guidance only</span></div><div class="table-wrap"><table class="table"><caption class="visually-hidden">Taxable income, deductible expenses, and taxable net for {{ summary.year }}</caption><thead><tr><th scope="col">Taxable income</th><th scope="col" class="text-end">Deductible expenses</th><th scope="col" class="text-end">Taxable net</th></tr></thead><tbody><tr><td class="numeric">{{ summary.taxable_income|floatformat:'2g' }}</td><td class="text-end numeric">{{ summary.deductible_expenses|floatformat:'2g' }}</td><td class="text-end numeric {% if summary.taxable_net < 0 %}negative{% else %}positive{% endif %}">{{ summary.taxable_net|floatformat:'2g' }}</td></tr></tbody></table></div><p class="small text-secondary px-4 pb-4 mb-0">Control this with the “Include in tax” checkbox on each income and expense. This is a summary, not tax advice.</p></section>
+<section class="panel mb-4"><div class="panel-heading"><div><h2>The monthly picture</h2><p>Compare recorded income and expenses throughout {{ summary.year }}</p></div></div>{% include 'frontend/partials/chart.html' %}</section>
+<section class="panel" id="monthly-breakdown"><div class="panel-heading"><h2>Monthly breakdown</h2></div><div class="table-wrap"><table class="table"><caption class="visually-hidden">Monthly income, expenses, and net balance for {{ summary.year }}</caption><thead><tr><th scope="col">Month</th><th scope="col" class="text-end">Income</th><th scope="col" class="text-end">Expenses</th><th scope="col" class="text-end">Net balance</th></tr></thead><tbody>{% for month in summary.monthly %}<tr><th scope="row">{{ month.label }} {{ summary.year }}</th><td class="text-end numeric">{{ month.income|floatformat:'2g' }}</td><td class="text-end numeric">{{ month.expense|floatformat:'2g' }}</td><td class="text-end numeric {% if month.balance < 0 %}negative{% else %}positive{% endif %}">{{ month.balance|floatformat:'2g' }}</td></tr>{% endfor %}</tbody><tfoot><tr class="fw-semibold"><th scope="row">Year total</th><td class="text-end numeric">{{ summary.income_total|floatformat:'2g' }}</td><td class="text-end numeric">{{ summary.expense_total|floatformat:'2g' }}</td><td class="text-end numeric">{{ summary.balance|floatformat:'2g' }}</td></tr></tfoot></table></div></section>
+<section class="panel mt-4 mb-4"><div class="panel-heading"><div><h2>Where the money goes</h2><p>Top categories in {{ summary.year }}</p></div></div><div class="row g-4 px-4 pb-4"><div class="col-md-6"><h3 class="h6 mb-3">Expenses by category</h3><div style="position:relative;height:240px"><canvas id="chart-expense-cats" role="img" aria-label="Chart of expenses by category"></canvas></div></div><div class="col-md-6"><h3 class="h6 mb-3">Income by category</h3><div style="position:relative;height:240px"><canvas id="chart-income-cats" role="img" aria-label="Chart of income by category"></canvas></div></div></div></section>
+<section class="panel mb-4"><div class="panel-heading"><div><h2>Profit per farm</h2><p>Income, expenses and net in {{ summary.year }}</p></div></div><div class="px-4 pb-2"><div style="position:relative;height:220px"><canvas id="chart-farms" role="img" aria-label="Chart of income and expenses per farm"></canvas></div></div>{% if farm_rows %}<div class="table-wrap"><table class="table"><caption class="visually-hidden">Income, expenses and net per farm for {{ summary.year }}</caption><thead><tr><th scope="col">Farm</th><th scope="col" class="text-end">Income</th><th scope="col" class="text-end">Expenses</th><th scope="col" class="text-end">Net</th></tr></thead><tbody>{% for row in farm_rows %}<tr><th scope="row">{{ row.farm }}</th><td class="text-end numeric">{{ row.income|floatformat:'2g' }}</td><td class="text-end numeric">{{ row.expense|floatformat:'2g' }}</td><td class="text-end numeric {% if row.net < 0 %}negative{% else %}positive{% endif %}">{{ row.net|floatformat:'2g' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="small text-secondary px-4 pb-4 mb-0">Add a farm to see per-farm profit here.</p>{% endif %}</section>
+<section class="panel mb-4"><div class="panel-heading"><div><h2>Running balance</h2><p>Cumulative net through {{ summary.year }}</p></div></div><div class="px-4 pb-4"><div style="position:relative;height:220px"><canvas id="chart-cumulative" role="img" aria-label="Chart of cumulative balance"></canvas></div></div></section>
+{{ chart_data|json_script:"chart-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  var el = document.getElementById("chart-data");
+  if (!el || typeof Chart === "undefined") return;
+  var data = JSON.parse(el.textContent);
+  var palette = ["#244b3b", "#c4a967", "#708e61", "#a9ba8b", "#42684b", "#d5bd7e", "#7a8476", "#285d45"];
+  function doughnut(id, labels, totals) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    new Chart(canvas, {type: "doughnut", data: {labels: labels, datasets: [{data: totals, backgroundColor: palette, borderWidth: 2, borderColor: "#f6f5ef"}]}, options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {position: "bottom"}}}});
+  }
+  doughnut("chart-expense-cats", data.expenseCategories.labels, data.expenseCategories.totals);
+  doughnut("chart-income-cats", data.incomeCategories.labels, data.incomeCategories.totals);
+  var farms = document.getElementById("chart-farms");
+  if (farms) new Chart(farms, {type: "bar", data: {labels: data.farmProfit.labels, datasets: [{label: "Income", data: data.farmProfit.income, backgroundColor: "#2e7d5b"}, {label: "Expenses", data: data.farmProfit.expense, backgroundColor: "#c46a4a"}]}, options: {responsive: true, maintainAspectRatio: false, scales: {x: {grid: {display: false}}, y: {grid: {color: "#e2e6dd"}}}}});
+  var cumulative = document.getElementById("chart-cumulative");
+  if (cumulative) new Chart(cumulative, {type: "line", data: {labels: data.cumulative.labels, datasets: [{label: "Balance", data: data.cumulative.totals, borderColor: "#244b3b", backgroundColor: "rgba(196,169,103,.25)", fill: true, tension: .3}]}, options: {responsive: true, maintainAspectRatio: false, scales: {x: {grid: {display: false}}, y: {grid: {color: "#e2e6dd"}}}}});
+})();
+</script>
+{% endblock %}

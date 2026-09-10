@@ -1,0 +1,7 @@
+{% extends 'frontend_el/base_el.html' %}
+{% block title %}Διαγραφή {{ spec.singular }}{% endblock %}
+{% block breadcrumb %}{{ spec.title }}{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'record-list' resource %}">← Επιστροφή στα {{ spec.title|lower }}</a>
+<div class="row justify-content-center mt-4"><div class="col-lg-8 col-xl-6"><section class="panel form-panel"><span class="pill pill-warm mb-3">ΕΠΙΒΕΒΑΙΩΣΗ ΔΙΑΓΡΑΦΗΣ</span><h1 class="h3">Διαγραφή αυτής της {{ spec.singular }};</h1><p class="text-secondary">Πρόκειται να διαγράψετε <strong class="text-dark">{{ record }}</strong>.</p>{% if blocked %}<div class="alert alert-warning" role="alert">Αυτή η {{ spec.singular }} χρησιμοποιείται από υπάρχουσες συναλλαγές και δεν μπορεί να διαγραφεί. Ενημερώστε πρώτα αυτές τις συναλλαγές ή κρατήστε την εγγραφή για το ιστορικό σας.</div><a class="btn btn-outline-secondary" href="{% url 'record-list' resource %}">Επιστροφή στα {{ spec.title|lower }}</a>{% else %}<p class="small text-secondary">Αυτή η ενέργεια δεν μπορεί να αναιρεθεί. Ελέγξτε την εγγραφή πριν συνεχίσετε.</p><form method="post" class="form-actions">{% csrf_token %}<button class="btn btn-danger" type="submit">Διαγραφή {{ spec.singular }}</button><a class="btn btn-outline-secondary" href="{% url 'record-list' resource %}">Διατήρηση εγγραφής</a></form>{% endif %}</section></div></div>
+{% endblock %}

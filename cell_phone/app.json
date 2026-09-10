@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Agro",
+    "slug": "agro-cell-phone",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "primaryColor": "#244b3b",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.agro.cellphone",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#244b3b"
+      }
+    },
+    "plugins": [
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": false
+        }
+      ],
+      "expo-asset",
+      "expo-sharing",
+      "expo-status-bar"
+    ]
+  }
+}

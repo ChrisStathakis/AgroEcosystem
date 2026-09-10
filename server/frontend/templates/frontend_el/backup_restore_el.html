@@ -1,0 +1,22 @@
+{% extends 'frontend_el/base_el.html' %}
+{% block title %}Επαναφορά από αντίγραφο{% endblock %}
+{% block breadcrumb %}Ρυθμίσεις{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Επιστροφή στις ρυθμίσεις</a>
+<div class="page-header"><div><div class="eyebrow mb-2">ΤΑ ΔΕΔΟΜΕΝΑ ΣΑΣ</div><h1>Επαναφορά από αντίγραφο</h1><p>Επαναφέρετε έναν χώρο εργασίας που αποθηκεύσατε ως JSON.</p></div></div>
+<div class="row g-4"><div class="col-xl-8"><section class="panel form-panel">
+{% if preview %}
+<h2 class="mb-1">Ελέγξτε πριν την επαναφορά</h2>
+<p class="small text-secondary mb-4">Το αρχείο περιέχει <strong>{{ preview.farms }} φάρμα/ες</strong>, <strong>{{ preview.expenses }} έξοδα</strong> και <strong>{{ preview.incomes }} έσοδα</strong>. Λειτουργία: <strong>{{ form.mode.value }}</strong>.</p>
+<div class="table-wrap"><table class="table"><caption class="visually-hidden">Εγγραφές στο αρχείο αντιγράφου</caption><thead><tr><th scope="col">Συλλογή</th><th scope="col" class="text-end">Στο αρχείο</th></tr></thead><tbody>
+{% for key, count in preview.items %}<tr><th scope="row">{{ key }}</th><td class="text-end numeric">{{ count }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if form.mode.value == 'replace' %}<div class="alert alert-warning" role="alert"><strong>Λειτουργία αντικατάστασης:</strong> διαγράφει όλα τα τρέχοντα δεδομένα σας ({{ counts.farms }} φάρμες, {{ counts.expenses }} έξοδα, {{ counts.incomes }} έσοδα) πριν την εισαγωγή. Κατεβάστε νέο αντίγραφο πρώτα αν δεν είστε σίγουροι.</div>{% endif %}
+<form method="post">{% csrf_token %}<input type="hidden" name="confirm" value="1"><input type="hidden" name="mode" value="{{ form.mode.value }}"><div class="form-actions"><button class="btn btn-primary" type="submit">Επιβεβαίωση επαναφοράς</button><a class="btn btn-outline-secondary" href="{% url 'workspace-restore' %}">Επιλογή άλλου αρχείου</a></div></form>
+{% else %}
+<h2 class="mb-1">Ανεβάστε ένα αντίγραφο</h2>
+<p class="small text-secondary mb-4">Γίνονται δεκτά μόνο αρχεία JSON από αυτή την εφαρμογή (έως 5 MB). Τίποτα δεν αλλάζει μέχρι την επιβεβαίωση στο επόμενο βήμα.</p>
+<form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}{% include 'frontend_el/partials/fields_el.html' with single_column=True %}<div class="form-actions"><button class="btn btn-primary" type="submit">Έλεγχος αντιγράφου</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Ακύρωση</a></div></form>
+{% endif %}
+</section></div><div class="col-xl-4"><aside class="helper-card"><span class="eyebrow">ΜΙΑ ΜΙΚΡΗ ΚΑΘΟΔΗΓΗΣΗ</span><h3 class="mt-3">Αντικατάσταση ή συγχώνευση;</h3><p><strong>Αντικατάσταση</strong> διαγράφει πρώτα τα τρέχοντα δεδομένα — ιδανικό για πλήρη ανάκτηση. <strong>Συγχώνευση</strong> κρατά τα υπάρχοντα και παραλείπει όσα ήδη υπάρχουν.</p><p class="mb-0 small">Ο χώρος σας έχει τώρα {{ counts.farms }} φάρμες, {{ counts.expenses }} έξοδα και {{ counts.incomes }} έσοδα.</p></aside></div></div>
+{% endblock %}

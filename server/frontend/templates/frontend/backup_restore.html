@@ -1,0 +1,22 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Restore from backup{% endblock %}
+{% block breadcrumb %}Settings{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Back to settings</a>
+<div class="page-header"><div><div class="eyebrow mb-2">YOUR DATA</div><h1>Restore from backup</h1><p>Bring back a workspace you saved earlier as JSON.</p></div></div>
+<div class="row g-4"><div class="col-xl-8"><section class="panel form-panel">
+{% if preview %}
+<h2 class="mb-1">Check before you restore</h2>
+<p class="small text-secondary mb-4">The file holds <strong>{{ preview.farms }} farm{{ preview.farms|pluralize }}</strong>, <strong>{{ preview.expenses }} expense{{ preview.expenses|pluralize }}</strong> and <strong>{{ preview.incomes }} income{{ preview.incomes|pluralize }}</strong>. Restoring in <strong>{{ form.mode.value }}</strong> mode.</p>
+<div class="table-wrap"><table class="table"><caption class="visually-hidden">Records in the backup file</caption><thead><tr><th scope="col">Collection</th><th scope="col" class="text-end">In file</th></tr></thead><tbody>
+{% for key, count in preview.items %}<tr><th scope="row">{{ key }}</th><td class="text-end numeric">{{ count }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if form.mode.value == 'replace' %}<div class="alert alert-warning" role="alert"><strong>Replace mode</strong> deletes everything currently in your workspace ({{ counts.farms }} farm{{ counts.farms|pluralize }}, {{ counts.expenses }} expense{{ counts.expenses|pluralize }}, {{ counts.incomes }} income{{ counts.incomes|pluralize }}) before importing. Download a fresh backup first if you are unsure.</div>{% endif %}
+<form method="post">{% csrf_token %}<input type="hidden" name="confirm" value="1"><input type="hidden" name="mode" value="{{ form.mode.value }}"><div class="form-actions"><button class="btn btn-primary" type="submit">Confirm restore</button><a class="btn btn-outline-secondary" href="{% url 'workspace-restore' %}">Choose another file</a></div></form>
+{% else %}
+<h2 class="mb-1">Upload a backup file</h2>
+<p class="small text-secondary mb-4">Only files exported from this app (JSON, up to 5 MB) are accepted. Nothing changes until you confirm on the next step.</p>
+<form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}{% include 'frontend/partials/fields.html' with single_column=True %}<div class="form-actions"><button class="btn btn-primary" type="submit">Inspect backup</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Cancel</a></div></form>
+{% endif %}
+</section></div><div class="col-xl-4"><aside class="helper-card"><span class="eyebrow">A LITTLE GUIDANCE</span><h3 class="mt-3">Replace or merge?</h3><p><strong>Replace</strong> wipes your current workspace first — best for a full recovery. <strong>Merge</strong> keeps what you have and skips records that already exist.</p><p class="mb-0 small">Your workspace currently holds {{ counts.farms }} farm{{ counts.farms|pluralize }}, {{ counts.expenses }} expense{{ counts.expenses|pluralize }} and {{ counts.incomes }} income{{ counts.incomes|pluralize }}.</p></aside></div></div>
+{% endblock %}

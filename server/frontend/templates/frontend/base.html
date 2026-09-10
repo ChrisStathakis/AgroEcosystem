@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#244b3b">
+  <title>{% block title %}Overview{% endblock %} · Agro</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  {% include 'frontend/partials/theme.html' %}
+</head>
+<body>
+<a class="visually-hidden-focusable skip-link" href="#main">Skip to content</a>
+{% block layout %}
+  <aside class="sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="navigation" aria-labelledby="navigation-title">
+    <div class="offcanvas-header"><span id="navigation-title" class="brand">agro<span class="brand-dot">.</span></span><button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#navigation" aria-label="Close navigation"></button></div>
+    <div class="offcanvas-body">
+      <a href="{% url 'home' %}" class="brand d-none d-lg-block">agro<span class="brand-dot">.</span></a>
+      <p class="nav-caption">YOUR FARM, IN FOCUS</p>
+      <nav class="nav flex-column gap-1" aria-label="Main navigation">
+        <a class="nav-link {% if active == 'dashboard' %}active{% endif %}" {% if active == 'dashboard' %}aria-current="page"{% endif %} href="{% url 'home' %}"><span aria-hidden="true">▦</span> Overview</a>
+        {% for slug, label in navigation %}<a class="nav-link {% if active == slug %}active{% endif %}" {% if active == slug %}aria-current="page"{% endif %} href="{% url 'record-list' slug %}"><span aria-hidden="true">{% if slug == 'farms' %}⌂{% elif slug == 'expenses' %}↗{% elif slug == 'incomes' %}↙{% else %}·{% endif %}</span>{{ label }}</a>{% endfor %}
+        <a class="nav-link {% if active == 'analytics' %}active{% endif %}" {% if active == 'analytics' %}aria-current="page"{% endif %} href="{% url 'analytics' %}"><span aria-hidden="true">▥</span> Analytics</a>
+      </nav>
+      <div class="sidebar-bottom"><div class="sidebar-note"><span class="eyebrow">ROOM TO GROW</span><p>A clear view of today.<br>A better plan for tomorrow.</p></div><a class="nav-link {% if active == 'profile' %}active{% endif %}" href="{% url 'profile-settings' %}"><span aria-hidden="true">⚙</span> Workspace settings</a></div>
+    </div>
+  </aside>
+  <div class="app-main">
+    <header class="topbar"><div class="d-flex align-items-center gap-3"><button class="btn btn-outline-secondary d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#navigation" aria-controls="navigation" aria-label="Open navigation">☰</button><span class="small text-secondary">Your workspace <span class="mx-2">/</span> <strong class="text-dark">{% block breadcrumb %}Overview{% endblock %}</strong></span></div><div class="d-flex align-items-center gap-3"><span class="d-none d-md-flex gap-1" role="group" aria-label="Language">{% if request.path|slice:":4:" == "/en/" %}<a class="btn btn-sm btn-outline-secondary" href="/el{{ request.path|slice:"3:" }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}">ΕΛ</a><a class="btn btn-sm btn-outline-secondary active" href="/en{{ request.path|slice:"3:" }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}" aria-current="true">EN</a>{% else %}<a class="btn btn-sm btn-outline-secondary" href="/el{{ request.path }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}">ΕΛ</a><a class="btn btn-sm btn-outline-secondary active" href="{{ request.path }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}" aria-current="true">EN</a>{% endif %}</span><a class="account" href="{% url 'profile-settings' %}"><span class="avatar" aria-hidden="true">{{ request.user.get_username|slice:':1'|upper }}</span><span class="d-none d-sm-inline">{{ request.user.get_username }}</span></a><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-sm btn-link text-secondary" type="submit">Log out</button></form></div></header>
+    <main id="main" class="content" tabindex="-1">
+      {% include 'frontend/partials/messages.html' %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="page-footer"><span>agro. <span class="text-secondary">Made for the way you grow.</span></span><span>{% now 'Y' %}</span></footer>
+  </div>
+{% endblock %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# python/django
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+.preview/
+.idea/
+
+# node/expo
+node_modules/
+.expo/
+dist/
+expo-env.d.ts
+
+# backups/logs/os
+*.bak52
+*.bak
+*.log
+.DS_Store
+Thumbs.db
