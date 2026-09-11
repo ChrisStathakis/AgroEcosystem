@@ -1,0 +1,9 @@
+<div class="d-flex flex-wrap gap-2 align-items-center mb-4 no-print" role="navigation" aria-label="Αναφορές αναλύσεων">
+  <a class="btn btn-sm {% if active == 'analytics' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{% url 'analytics' %}{% if query_params %}?{{ query_params }}{% endif %}">Επισκόπηση</a>
+  <a class="btn btn-sm {% if active == 'analytics-pl' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{% url 'analytics-pl' %}{% if query_params %}?{{ query_params }}{% endif %}">Κέρδη &amp; ζημίες</a>
+  <a class="btn btn-sm {% if active == 'analytics-cf' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{% url 'analytics-cf' %}{% if query_params %}?{{ query_params }}{% endif %}">Ταμειακή ροή</a>
+  <a class="btn btn-sm {% if active == 'analytics-tax' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{% url 'analytics-tax' %}{% if query_params %}?{{ query_params }}{% endif %}">Φορολογική αναφορά</a>
+  <span class="flex-grow-1"></span>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'analytics-export' export_report %}{% if query_params %}?{{ query_params }}{% endif %}">Εξαγωγή CSV</a>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ request.path }}?{% if query_params %}{{ query_params }}&{% endif %}print=1" target="_blank" rel="noopener">Εκτύπωση</a>
+</div>

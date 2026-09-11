@@ -54,6 +54,22 @@ export interface TreePlanting {
   tree_type_name?: string;
 }
 
+export type TreeMovementAction = 'add' | 'remove';
+
+export interface TreeInventoryMovement {
+  id: number;
+  profile_id: number;
+  planting_id: number;
+  action: TreeMovementAction;
+  quantity: number;
+  effective_date: string;
+  notes: string;
+  created_at: string;
+  farm_title?: string;
+  tree_type_name?: string;
+  balance_after?: number;
+}
+
 export type DocumentType = 'invoice' | 'receipt';
 
 export interface Expense {
@@ -78,7 +94,6 @@ export interface Expense {
 export interface Income {
   id: number;
   profile_id: number;
-  farm_id: number;
   category_id: number;
   customer_id: number | null;
   title: string;
@@ -90,8 +105,19 @@ export interface Income {
   created_at: string;
   updated_at: string;
   farm_title?: string;
+  farm_summary?: string | null;
+  unallocated_amount?: number;
   category_name?: string;
   contact_name?: string | null;
+}
+
+export interface IncomeFarmAllocation {
+  id: number;
+  profile_id: number;
+  income_id: number;
+  farm_id: number;
+  amount: number;
+  farm_title?: string;
 }
 
 export interface FarmTask {
@@ -128,6 +154,13 @@ export interface FinancialSummary {
   taxable_net: number;
   has_activity: boolean;
   monthly: MonthlyRow[];
+}
+
+export interface FarmProfitRow {
+  farm: string;
+  income: number;
+  expense: number;
+  net: number;
 }
 
 export const SINGLE_PROFILE_ID = 1;

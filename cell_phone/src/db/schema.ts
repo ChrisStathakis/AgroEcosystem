@@ -1,8 +1,8 @@
-// v1 schema. Ports Django constraints:
+// Current schema (v3). Ports Django constraints:
 // UNIQUE(profile,title/name), UNIQUE(farm,tree_type), PROTECT via
 // RESTRICT-equivalent checks in repositories (SQLite RESTRICT).
 
-export const SCHEMA_V1 = `
+export const SCHEMA_V3 = `
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS tree_plantings (
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   farm_id INTEGER NOT NULL REFERENCES farms(id) ON DELETE RESTRICT,
   tree_type_id INTEGER NOT NULL REFERENCES tree_types(id) ON DELETE RESTRICT,
-  count INTEGER NOT NULL CHECK (count > 0),
+  count INTEGER NOT NULL CHECK (count >= 0),
   planted_on TEXT,
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS tree_plantings (
   UNIQUE(farm_id, tree_type_id)
 );
 CREATE INDEX IF NOT EXISTS idx_plantings_farm ON tree_plantings(farm_id);
+
+CREATE TABLE IF NOT EXISTS tree_inventory_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  planting_id INTEGER NOT NULL REFERENCES tree_plantings(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL CHECK (action IN ('add','remove')),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  effective_date TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tree_movements_planting_date ON tree_inventory_movements(planting_id, effective_date);
 
 CREATE TABLE IF NOT EXISTS expenses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +122,6 @@ CREATE INDEX IF NOT EXISTS idx_expenses_profile_date ON expenses(profile_id, dat
 CREATE TABLE IF NOT EXISTS incomes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  farm_id INTEGER NOT NULL REFERENCES farms(id) ON DELETE RESTRICT,
   category_id INTEGER NOT NULL REFERENCES income_categories(id) ON DELETE RESTRICT,
   customer_id INTEGER REFERENCES customers(id) ON DELETE RESTRICT,
   title TEXT NOT NULL,
@@ -123,6 +134,16 @@ CREATE TABLE IF NOT EXISTS incomes (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incomes_profile_date ON incomes(profile_id, date);
+
+CREATE TABLE IF NOT EXISTS income_farm_allocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  income_id INTEGER NOT NULL REFERENCES incomes(id) ON DELETE CASCADE,
+  farm_id INTEGER NOT NULL REFERENCES farms(id) ON DELETE RESTRICT,
+  amount REAL NOT NULL CHECK (amount > 0),
+  UNIQUE(income_id, farm_id)
+);
+CREATE INDEX IF NOT EXISTS idx_income_allocations_farm ON income_farm_allocations(farm_id);
 
 CREATE TABLE IF NOT EXISTS farm_tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

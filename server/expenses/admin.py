@@ -28,8 +28,8 @@ class ExpenseCategoryAdmin(ProfileScopedAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(ProfileScopedAdmin):
-    list_display = ("title", "farm", "category", "vendor", "amount", "date", "document_type", "include_in_tax")
-    list_filter = ("document_type", "include_in_tax", "category")
+    list_display = ("title", "farm", "category", "vendor", "amount", "date", "document_type", "include_in_tax", "is_archived")
+    list_filter = ("document_type", "include_in_tax", "is_archived", "category")
     search_fields = ("title", "description", "farm__title")
     autocomplete_fields = ("farm", "category", "vendor")
 

@@ -27,5 +27,6 @@ profile id=1, and inserts starter categories (`src/db/seed.ts`).
 ## Notes
 
 - Money stored as REAL, checked `> 0`; sizes/counts validated like Django.
-- Deletes emulate `on_delete=PROTECT` with friendly messages; tasks null out planting/expense like `SET_NULL`.
+- Tree additions/removals are append-only inventory movements; zero-balance groups remain for history. Farm and other deletes emulate `on_delete=PROTECT` with friendly messages; tasks null out planting/expense like `SET_NULL`.
+- Income is a global amount with optional per-farm allocation rows; partial allocations are reported with an explicit Unallocated remainder.
 - Dates are `YYYY-MM-DD` strings for easy SQLite comparison.

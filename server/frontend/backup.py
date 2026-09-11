@@ -8,15 +8,16 @@ from django.db import transaction
 from django.utils import timezone
 
 from expenses.models import Expense, ExpenseCategory, Vendor
-from farm.models import Farm, FarmTask, TaskCategory, TreePlanting, TreeType
+from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 from incomes import models as income_models
+from incomes.models import IncomeFarmAllocation
 
-BACKUP_VERSION = 1
+BACKUP_VERSION = 3
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 COLLECTIONS = (
     "expense_categories", "income_categories", "task_categories", "tree_types",
-    "farms", "vendors", "customers", "tree_plantings", "expenses", "incomes",
+    "farms", "vendors", "customers", "tree_plantings", "tree_movements", "expenses", "incomes",
     "tasks",
 )
 
@@ -35,6 +36,7 @@ def workspace_counts(profile) -> dict:
     return {
         "farms": Farm.objects.filter(profile=profile).count(),
         "trees": TreePlanting.objects.filter(profile=profile).count(),
+        "tree_movements": TreeInventoryMovement.objects.filter(profile=profile).count(),
         "tasks": FarmTask.objects.filter(profile=profile).count(),
         "expenses": Expense.objects.filter(profile=profile).count(),
         "incomes": income_models.Income.objects.filter(profile=profile).count(),
@@ -65,6 +67,7 @@ def build_backup(profile) -> dict:
     customer_idx = {c.pk: i for i, c in enumerate(customers)}
     plantings = list(TreePlanting.objects.filter(profile=profile).select_related("farm", "tree_type").order_by("pk"))
     planting_idx = {p.pk: i for i, p in enumerate(plantings)}
+    movements = list(TreeInventoryMovement.objects.filter(profile=profile).order_by("pk"))
     expenses = list(Expense.objects.filter(profile=profile).order_by("pk"))
     expense_idx = {e.pk: i for i, e in enumerate(expenses)}
 
@@ -85,17 +88,22 @@ def build_backup(profile) -> dict:
                             "count": p.count,
                             "planted_on": p.planted_on.isoformat() if p.planted_on else None,
                             "notes": p.notes} for p in plantings],
+        "tree_movements": [{"planting": planting_idx[m.planting_id], "action": m.action,
+                             "quantity": m.quantity, "effective_date": m.effective_date.isoformat(),
+                             "notes": m.notes} for m in movements],
         "expenses": [{"farm": farm_idx[e.farm_id], "category": expense_category_idx[e.category_id],
                       "vendor": vendor_idx[e.vendor_id] if e.vendor_id else None,
                       "title": e.title, "description": e.description, "amount": str(e.amount),
                       "date": e.date.isoformat(), "document_type": e.document_type,
-                      "include_in_tax": e.include_in_tax} for e in expenses],
-        "incomes": [{"farm": farm_idx[i.farm_id], "category": income_category_idx[i.category_id],
+                      "include_in_tax": e.include_in_tax, "is_archived": e.is_archived} for e in expenses],
+        "incomes": [{"allocations": [{"farm": farm_idx[a.farm_id], "amount": str(a.amount)}
+                                        for a in i.allocations.all()],
+                     "category": income_category_idx[i.category_id],
                      "customer": customer_idx[i.customer_id] if i.customer_id else None,
                      "title": i.title, "description": i.description, "amount": str(i.amount),
-                     "date": i.date.isoformat(), "document_type": i.document_type,
-                     "include_in_tax": i.include_in_tax}
-                    for i in income_models.Income.objects.filter(profile=profile).order_by("pk")],
+                      "date": i.date.isoformat(), "document_type": i.document_type,
+                      "include_in_tax": i.include_in_tax, "is_archived": i.is_archived}
+                     for i in income_models.Income.objects.filter(profile=profile).order_by("pk")],
         "tasks": [{"farm": farm_idx[t.farm_id],
                    "planting": planting_idx[t.planting_id] if t.planting_id else None,
                    "category": task_category_idx[t.category_id],
@@ -113,6 +121,7 @@ def destroy_workspace(profile):
     FarmTask.objects.filter(profile=profile).delete()
     Expense.objects.filter(profile=profile).delete()
     income_models.Income.objects.filter(profile=profile).delete()
+    TreeInventoryMovement.objects.filter(profile=profile).delete()
     TreePlanting.objects.filter(profile=profile).delete()
     Vendor.objects.filter(profile=profile).delete()
     income_models.Customer.objects.filter(profile=profile).delete()
@@ -143,12 +152,12 @@ def describe_payload(payload) -> dict:
     if not isinstance(payload, dict):
         raise BackupError("This file is not a valid backup.",
                           "Αυτό το αρχείο δεν είναι έγκυρο αντίγραφο ασφαλείας.")
-    if payload.get("version") != BACKUP_VERSION:
+    if payload.get("version") not in (1, 2, BACKUP_VERSION):
         raise BackupError("This backup was made by an unsupported app version.",
                           "Αυτό το αντίγραφο έγινε από μη υποστηριζόμενη έκδοση.")
     counts = {}
     for key in COLLECTIONS:
-        counts[key] = len(_require_list(payload, key))
+        counts[key] = len(_require_list(payload, key)) if key != "tree_movements" or payload.get("version") in (2, BACKUP_VERSION) else 0
     return counts
 
 
@@ -206,6 +215,28 @@ def restore_backup(profile, payload, mode="replace") -> dict:
         planting.save()
         plantings.append(planting)
 
+    movement_items = _require_list(payload, "tree_movements") if payload.get("version") in (2, BACKUP_VERSION) else []
+    if payload.get("version") == 1:
+        # Legacy backups contain only the current count; preserve it as an opening movement.
+        movement_items = [{"planting": index, "action": "add", "quantity": item.get("count", 0),
+                           "effective_date": item.get("planted_on") or timezone.localdate().isoformat(),
+                           "notes": "Opening balance imported from a legacy backup."}
+                          for index, item in enumerate(_require_list(payload, "tree_plantings"))
+                          if item.get("count", 0) > 0]
+    for item in movement_items:
+        planting = _require_index(plantings, item.get("planting"), "tree_movements", "planting")
+        if mode == "merge" and TreeInventoryMovement.objects.filter(
+                profile=profile, planting=planting, action=item.get("action"),
+                quantity=item.get("quantity", 0), effective_date=item.get("effective_date"),
+                notes=item.get("notes", "")).exists():
+            continue
+        movement = TreeInventoryMovement(profile=profile, planting=planting,
+                                         action=item.get("action"), quantity=item.get("quantity", 0),
+                                         effective_date=item.get("effective_date"), notes=item.get("notes", ""))
+        movement.full_clean()
+        movement.save()
+    counts["tree_movements"] = len(movement_items)
+
     expenses = []
     for item in _require_list(payload, "expenses"):
         farm = _require_index(farms, item.get("farm"), "expenses", "farm")
@@ -224,34 +255,58 @@ def restore_backup(profile, payload, mode="replace") -> dict:
                           title=item.get("title", ""), description=item.get("description", ""),
                           amount=item.get("amount", 0), date=item.get("date"),
                           document_type=_checked_document(item.get("document_type"), "expenses"),
-                          include_in_tax=bool(item.get("include_in_tax", False)))
+                          include_in_tax=bool(item.get("include_in_tax", False)),
+                          is_archived=bool(item.get("is_archived", False)))
         expense.full_clean()
         expense.save()
         expenses.append(expense)
 
     incomes = []
-    for item in _require_list(payload, "incomes"):
-        farm = _require_index(farms, item.get("farm"), "incomes", "farm")
+    income_items = _require_list(payload, "incomes")
+    for item in income_items:
         category = _require_index(income_categories, item.get("category"), "incomes", "category")
         customer = None
         if item.get("customer") is not None:
             customer = _require_index(customers, item.get("customer"), "incomes", "customer")
         if mode == "merge" and income_models.Income.objects.filter(
-                profile=profile, farm=farm, title=item.get("title", ""),
-                date=item.get("date"), amount=item.get("amount", 0)).exists():
+                profile=profile, title=item.get("title", ""), date=item.get("date"),
+                amount=item.get("amount", 0)).exists():
             incomes.append(income_models.Income.objects.filter(
-                profile=profile, farm=farm, title=item.get("title", ""),
-                date=item.get("date"), amount=item.get("amount", 0)).first())
+                profile=profile, title=item.get("title", ""), date=item.get("date"),
+                amount=item.get("amount", 0)).first())
             continue
         income = income_models.Income(
-            profile=profile, farm=farm, category=category, customer=customer,
+            profile=profile, category=category, customer=customer,
             title=item.get("title", ""), description=item.get("description", ""),
             amount=item.get("amount", 0), date=item.get("date"),
             document_type=_checked_document(item.get("document_type"), "incomes"),
-            include_in_tax=bool(item.get("include_in_tax", True)))
+            include_in_tax=bool(item.get("include_in_tax", True)),
+            is_archived=bool(item.get("is_archived", False)))
         income.full_clean()
         income.save()
         incomes.append(income)
+
+    for index, (income, item) in enumerate(zip(incomes, income_items)):
+        if payload.get("version") >= 3:
+            allocation_items = _require_list({"allocations": item.get("allocations", [])}, "allocations")
+        else:
+            allocation_items = ([{"farm": item.get("farm"), "amount": item.get("amount", 0)}]
+                                if item.get("farm") is not None else [])
+        allocated = 0
+        for allocation_item in allocation_items:
+            farm = _require_index(farms, allocation_item.get("farm"), "incomes", "farm")
+            amount = allocation_item.get("amount", 0)
+            existing = IncomeFarmAllocation.objects.filter(profile=profile, income=income, farm=farm).first()
+            if existing is not None and mode == "merge":
+                allocated += existing.amount
+                continue
+            allocation = IncomeFarmAllocation(profile=profile, income=income, farm=farm, amount=amount)
+            allocation.full_clean()
+            allocation.save()
+            allocated += allocation.amount
+        if allocated > income.amount:
+            raise BackupError("Income allocations exceed the income amount.",
+                              "Οι κατανομές ξεπερνούν το ποσό του εσόδου.")
 
     created_tasks = 0
     for item in _require_list(payload, "tasks"):

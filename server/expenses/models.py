@@ -49,6 +49,7 @@ class Expense(models.Model):
     date = models.DateField(default=timezone.localdate, help_text="Date on which the expense occurred.")
     document_type = models.CharField(max_length=10, choices=DocumentType.choices, help_text="Document supplied for this expense.")
     include_in_tax = models.BooleanField(default=False, help_text="Include this expense when calculating tax deductions.")
+    is_archived = models.BooleanField(default=False, help_text="Archived expenses stay in lists and reports but are hidden from task dropdowns.")
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the expense was created.")
     updated_at = models.DateTimeField(auto_now=True, help_text="When the expense was last changed.")
 

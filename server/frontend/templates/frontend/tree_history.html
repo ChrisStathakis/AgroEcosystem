@@ -1,0 +1,7 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Tree history{% endblock %}
+{% block breadcrumb %}Trees{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'record-list' 'trees' %}">← Back to trees</a><div class="page-header"><div><div class="eyebrow mb-2">TREE HISTORY</div><h1>{{ planting.farm }} · {{ planting.tree_type }}</h1><p>Current balance: <strong>{{ planting.count }}</strong> trees</p></div><a class="btn btn-primary" href="{% url 'tree-movement-create' %}">+ Record movement</a></div>
+<section class="panel"><div class="panel-heading"><h2>{{ movements|length }} movement{{ movements|length|pluralize }}</h2></div>{% if movements %}<div class="table-wrap"><table class="table align-middle"><thead><tr><th>Date</th><th>Movement</th><th class="text-end">Quantity</th><th class="text-end">Balance after</th><th>Notes</th></tr></thead><tbody>{% for movement in movements %}<tr><td class="text-nowrap">{{ movement.effective_date|date:'d M Y' }}</td><td><span class="pill {% if movement.action == 'remove' %}pill-warm{% endif %}">{{ movement.get_action_display }}</span></td><td class="text-end numeric">{% if movement.action == 'remove' %}-{% else %}+{% endif %}{{ movement.quantity }}</td><td class="text-end numeric">{{ movement.balance_after }}</td><td>{{ movement.notes|default:'—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><h3>No movement history</h3></div>{% endif %}</section>
+{% endblock %}

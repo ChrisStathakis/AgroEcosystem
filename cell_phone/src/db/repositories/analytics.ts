@@ -1,5 +1,5 @@
 import { getDb } from '../client';
-import { SINGLE_PROFILE_ID, type FinancialSummary } from '../types';
+import { SINGLE_PROFILE_ID, type FinancialSummary, type FarmProfitRow } from '../types';
 import type { SQLiteBindValue } from 'expo-sqlite';
 
 // Port of server/analytics/services.py::financial_summary for the
@@ -50,6 +50,33 @@ export async function financialSummary(year: number = new Date().getFullYear()):
   };
 }
 
+/** Per-farm income uses allocation amounts; unallocated income reconciles the global total. */
+export async function farmProfit(year = new Date().getFullYear()): Promise<FarmProfitRow[]> {
+  const db = getDb();
+  const farms = await db.getAllAsync<{ title: string; income: number; expense: number }>(
+    `SELECT f.title,
+       COALESCE((SELECT SUM(ia.amount) FROM income_farm_allocations ia JOIN incomes i ON i.id = ia.income_id
+                 WHERE ia.farm_id = f.id AND substr(i.date,1,4) = ?), 0) AS income,
+       COALESCE((SELECT SUM(e.amount) FROM expenses e
+                 WHERE e.farm_id = f.id AND substr(e.date,1,4) = ?), 0) AS expense
+     FROM farms f WHERE f.profile_id = ? ORDER BY f.title`,
+    [String(year), String(year), SINGLE_PROFILE_ID],
+  );
+  const total = (await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM incomes WHERE profile_id = ? AND substr(date,1,4) = ?`,
+    [SINGLE_PROFILE_ID, String(year)],
+  ))?.total ?? 0;
+  const allocated = (await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(ia.amount), 0) AS total FROM income_farm_allocations ia JOIN incomes i ON i.id = ia.income_id
+     WHERE ia.profile_id = ? AND substr(i.date,1,4) = ?`,
+    [SINGLE_PROFILE_ID, String(year)],
+  ))?.total ?? 0;
+  const rows: FarmProfitRow[] = farms.map((row) => ({ farm: row.title, income: row.income, expense: row.expense, net: row.income - row.expense }));
+  const unallocated = total - allocated;
+  if (unallocated > 0.000001) rows.push({ farm: 'Unallocated', income: unallocated, expense: 0, net: unallocated });
+  return rows.sort((a, b) => b.net - a.net);
+}
+
 export async function recentTransactions(limit = 6) {
   const db = getDb();
   const expenses = await db.getAllAsync<any>(
@@ -58,7 +85,10 @@ export async function recentTransactions(limit = 6) {
     [SINGLE_PROFILE_ID, limit],
   );
   const incomes = await db.getAllAsync<any>(
-    `SELECT i.*, f.title AS farm_title FROM incomes i JOIN farms f ON f.id = i.farm_id
+    `SELECT i.*, (SELECT GROUP_CONCAT(f.title || ' (' || printf('%.2f', ia.amount) || ')', ', ')
+       FROM income_farm_allocations ia JOIN farms f ON f.id = ia.farm_id WHERE ia.income_id = i.id) AS farm_summary,
+       i.amount - COALESCE((SELECT SUM(ia.amount) FROM income_farm_allocations ia WHERE ia.income_id = i.id), 0) AS unallocated_amount
+     FROM incomes i
      WHERE i.profile_id = ? ORDER BY i.date DESC, i.id DESC LIMIT ?`,
     [SINGLE_PROFILE_ID, limit],
   );

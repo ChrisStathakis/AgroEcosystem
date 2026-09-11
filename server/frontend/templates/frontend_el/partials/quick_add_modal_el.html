@@ -1,0 +1,163 @@
+<div class="modal fade" id="quickAddModal" tabindex="-1" aria-labelledby="quickAddTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="quickAddTitle">Προσθήκη</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+      </div>
+      <div class="modal-body">
+        <div id="quickAddBody"><p class="text-secondary">Φόρτωση…</p></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+        <button type="button" class="btn btn-primary" id="quickAddSave">Αποθήκευση</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  function onReady(fn) {
+    if (document.readyState !== "loading") { fn(); }
+    else { document.addEventListener("DOMContentLoaded", fn); }
+  }
+  onReady(function () {
+    var FIELD_MAP = {
+      "tasks": { "farm": "farms", "category": "task-categories" },
+      "expenses": { "farm": "farms", "category": "expense-categories", "vendor": "vendors" },
+      "incomes": { "category": "income-categories", "customer": "customers" },
+      "trees": { "farm": "farms", "tree_type": "tree-types" }
+    };
+    var URLS = {
+      "farms": "{% url 'record-quick-create' 'farms' %}",
+      "task-categories": "{% url 'record-quick-create' 'task-categories' %}",
+      "expense-categories": "{% url 'record-quick-create' 'expense-categories' %}",
+      "income-categories": "{% url 'record-quick-create' 'income-categories' %}",
+      "tree-types": "{% url 'record-quick-create' 'tree-types' %}",
+      "vendors": "{% url 'record-quick-create' 'vendors' %}",
+      "customers": "{% url 'record-quick-create' 'customers' %}"
+    };
+    var current = "{{ resource }}";
+    var fields = FIELD_MAP[current] || {};
+    Object.keys(fields).forEach(function (field) {
+      var quickRes = fields[field];
+      var select = document.getElementById("id_" + field);
+      if (!select || select.dataset.quickAddEnhanced) return;
+      select.dataset.quickAddEnhanced = "1";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-outline-secondary btn-sm ms-2 align-middle";
+      btn.textContent = "+";
+      btn.setAttribute("aria-label", "Προσθήκη νέου");
+      btn.title = "Προσθήκη χωρίς να φύγετε από τη σελίδα";
+      btn.dataset.quickAdd = quickRes;
+      btn.dataset.quickTarget = "id_" + field;
+      select.insertAdjacentElement("afterend", btn);
+    });
+
+    var modalEl = document.getElementById("quickAddModal");
+    var titleEl = document.getElementById("quickAddTitle");
+    var bodyEl = document.getElementById("quickAddBody");
+    var saveBtn = document.getElementById("quickAddSave");
+    if (!modalEl || !bodyEl || !saveBtn) return;
+    var activeResource = null;
+    var activeSelectId = null;
+
+    function getCookie(name) {
+      var value = "; " + document.cookie;
+      var parts = value.split("; " + name + "=");
+      if (parts.length === 2) return parts.pop().split(";").shift();
+      return "";
+    }
+    function getModal() {
+      if (window.bootstrap && window.bootstrap.Modal) {
+        return window.bootstrap.Modal.getOrCreateInstance(modalEl);
+      }
+      return null;
+    }
+    document.addEventListener("click", function (event) {
+      var btn = event.target.closest("[data-quick-add]");
+      if (!btn) return;
+      event.preventDefault();
+      activeResource = btn.dataset.quickAdd;
+      activeSelectId = btn.dataset.quickTarget;
+      var url = URLS[activeResource];
+      if (!url) return;
+      titleEl.textContent = "Προσθήκη";
+      bodyEl.innerHTML = '<p class="text-secondary">Φόρτωση…</p>';
+      saveBtn.disabled = true;
+      var modal = getModal();
+      if (modal) modal.show(); else modalEl.style.display = "block";
+      fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          titleEl.textContent = data.title || "Προσθήκη";
+          bodyEl.innerHTML = data.html || "";
+          saveBtn.disabled = false;
+        })
+        .catch(function () {
+          bodyEl.innerHTML = '<div class="alert alert-danger">Δεν φορτώθηκε η φόρμα. Δοκιμάστε ξανά.</div>';
+          saveBtn.disabled = false;
+        });
+    });
+    function selectHasValue(id) {
+      var el = document.getElementById(id);
+      return !!el && el.options.length > 0 && el.value !== "" && el.value !== "---------";
+    }
+    function refreshPrerequisitesWarning() {
+      var warning = document.querySelector("[data-prerequisites-warning]");
+      if (!warning) return;
+      var checks = {
+        "tasks": ["id_farm", "id_category"],
+        "expenses": ["id_farm", "id_category"],
+        "trees": ["id_farm", "id_tree_type"],
+        "incomes": ["id_category"]
+      };
+      var required = checks[current] || [];
+      var done = required.every(selectHasValue);
+      if (done) warning.remove();
+    }
+    saveBtn.addEventListener("click", function () {
+      var url = URLS[activeResource];
+      if (!url) return;
+      var formData = new FormData();
+      bodyEl.querySelectorAll("input, select, textarea").forEach(function (el) {
+        if (!el.name) return;
+        if (el.type === "checkbox") { formData.append(el.name, el.checked ? "on" : ""); }
+        else { formData.append(el.name, el.value); }
+      });
+      saveBtn.disabled = true;
+      fetch(url, {
+        method: "POST",
+        headers: { "X-CSRFToken": getCookie("csrftoken"), "X-Requested-With": "XMLHttpRequest" },
+        body: formData
+      }).then(function (resp) {
+        return resp.json().then(function (data) { return { status: resp.status, data: data }; });
+      }).then(function (result) {
+        if (result.status === 201) {
+          var select = activeSelectId ? document.getElementById(activeSelectId) : null;
+          if (select) {
+            var opt = document.createElement("option");
+            opt.value = String(result.data.id);
+            opt.textContent = result.data.label;
+            opt.selected = true;
+            select.appendChild(opt);
+            select.value = String(result.data.id);
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            select.focus();
+          }
+          var modal = getModal();
+          if (modal) modal.hide(); else modalEl.style.display = "none";
+          refreshPrerequisitesWarning();
+        } else {
+          bodyEl.innerHTML = (result.data && result.data.html) || '<div class="alert alert-danger">Διορθώστε τα σφάλματα.</div>';
+        }
+        saveBtn.disabled = false;
+      }).catch(function () {
+        bodyEl.insertAdjacentHTML("afterbegin", '<div class="alert alert-danger">Δεν αποθηκεύτηκε. Δοκιμάστε ξανά.</div>');
+        saveBtn.disabled = false;
+      });
+    });
+  });
+})();
+</script>

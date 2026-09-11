@@ -40,7 +40,7 @@ class Income(models.Model):
         RECEIPT = "receipt", "Receipt"
     
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name="incomes", editable=False, help_text="Profile that owns this income.")
-    farm = models.ForeignKey(Farm, on_delete=models.PROTECT, related_name="incomes", help_text="Farm this income belongs to.")
+    farms = models.ManyToManyField(Farm, through="IncomeFarmAllocation", related_name="incomes", blank=True)
     category = models.ForeignKey(IncomeCategory, on_delete=models.PROTECT, related_name="incomes", help_text="Income category.")
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="incomes", blank=True, null=True, help_text="Optional customer who provided this income.")
     title = models.CharField(max_length=150, help_text="Short description of the income.")
@@ -49,6 +49,7 @@ class Income(models.Model):
     date = models.DateField(default=timezone.localdate, help_text="Date on which the income was received.")
     document_type = models.CharField(max_length=10, choices=DocumentType.choices, help_text="Document supplied for this income.")
     include_in_tax = models.BooleanField(default=True, help_text="Include this income when calculating taxable income.")
+    is_archived = models.BooleanField(default=False, help_text="Archived incomes stay in lists and reports but are hidden from selection dropdowns.")
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the income was created.")
     updated_at = models.DateTimeField(auto_now=True, help_text="When the income was last changed.")
 
@@ -57,8 +58,6 @@ class Income(models.Model):
 
     def clean(self):
         from django.core.exceptions import ValidationError
-        if self.farm_id and self.profile_id and self.farm.profile_id != self.profile_id:
-            raise ValidationError({"farm": "Farm must belong to the same profile."})
         if self.category_id and self.profile_id and self.category.profile_id != self.profile_id:
             raise ValidationError({"category": "Category must belong to the same profile."})
         if self.customer_id and self.profile_id and self.customer.profile_id != self.profile_id:
@@ -66,3 +65,54 @@ class Income(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.amount})"
+
+    @property
+    def farm(self):
+        """Compatibility/display value for templates expecting the old farm field."""
+        allocations = list(self.allocations.select_related("farm").all())
+        if not allocations:
+            return "Unallocated"
+        total = sum((allocation.amount for allocation in allocations), self.amount - self.amount)
+        parts = [f"{allocation.farm} ({allocation.amount:.2f})" for allocation in allocations]
+        remainder = self.amount - total
+        if remainder:
+            parts.append(f"Unallocated ({remainder:.2f})")
+        return ", ".join(parts)
+
+
+class IncomeFarmAllocation(models.Model):
+    """Optional portion of an income attributed to one farm."""
+
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="income_farm_allocations", editable=False,
+        help_text="Profile that owns this allocation.",
+    )
+    income = models.ForeignKey(Income, on_delete=models.CASCADE, related_name="allocations")
+    farm = models.ForeignKey(Farm, on_delete=models.PROTECT, related_name="income_allocations")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Amount attributed to this farm.")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["income", "farm"], name="unique_income_farm_allocation")]
+        ordering = ["farm__title", "pk"]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.income_id and self.profile_id and self.income.profile_id != self.profile_id:
+            raise ValidationError({"income": "Income must belong to the same profile."})
+        if self.farm_id and self.profile_id and self.farm.profile_id != self.profile_id:
+            raise ValidationError({"farm": "Farm must belong to the same profile."})
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({"amount": "Allocation must be greater than zero."})
+        if self.income_id and self.amount is not None:
+            from decimal import Decimal
+            existing_total = (IncomeFarmAllocation.objects.filter(income_id=self.income_id)
+                              .exclude(pk=self.pk).aggregate(total=models.Sum("amount"))["total"] or Decimal("0"))
+            if Decimal(str(existing_total)) + Decimal(str(self.amount)) > Decimal(str(self.income.amount)):
+                raise ValidationError("Farm allocations cannot exceed the income amount.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.farm}: {self.amount}"

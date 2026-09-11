@@ -1,0 +1,7 @@
+{% if not print_mode %}
+<section class="panel mb-4 no-print"><form method="get" class="p-4" aria-label="Φίλτρα αναλύσεων">
+{% if filter_form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ filter_form.non_field_errors }}</div>{% endif %}
+<div class="row g-3 align-items-end">{% for field in filter_form %}<div class="col-sm-6 col-lg-4 col-xl-2 {% if field.errors %}field-error{% endif %}"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}<div class="col-sm-6 col-lg-4 col-xl-4 d-flex gap-2"><button class="btn btn-primary" type="submit">Εφαρμογή φίλτρων</button><a class="btn btn-outline-secondary" href="{{ request.path }}">Καθαρισμός</a></div></div>
+</form></section>
+{% endif %}
+{% if filter_description %}<p class="small text-secondary mb-4">{{ filter_description }}</p>{% endif %}

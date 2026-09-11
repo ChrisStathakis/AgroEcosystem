@@ -19,7 +19,13 @@
       <nav class="nav flex-column gap-1" aria-label="Κύρια πλοήγηση">
         <a class="nav-link {% if active == 'dashboard' %}active{% endif %}" {% if active == 'dashboard' %}aria-current="page"{% endif %} href="{% url 'home' %}"><span aria-hidden="true">▦</span> Επισκόπηση</a>
         {% for slug, label in navigation %}<a class="nav-link {% if active == slug %}active{% endif %}" {% if active == slug %}aria-current="page"{% endif %} href="{% url 'record-list' slug %}"><span aria-hidden="true">{% if slug == 'farms' %}⌂{% elif slug == 'expenses' %}↗{% elif slug == 'incomes' %}↙{% else %}·{% endif %}</span>{{ label }}</a>{% endfor %}
-        <a class="nav-link {% if active == 'analytics' %}active{% endif %}" {% if active == 'analytics' %}aria-current="page"{% endif %} href="{% url 'analytics' %}"><span aria-hidden="true">▥</span> Αναλύσεις</a>
+        <a class="nav-link {% if active|slice:':9' == 'analytics' %}active{% endif %}" {% if active|slice:':9' == 'analytics' %}aria-current="page"{% endif %} href="{% url 'analytics' %}"><span aria-hidden="true">▥</span> Αναλύσεις</a>
+        {% if active|slice:':9' == 'analytics' %}<nav class="nav flex-column gap-1 ms-4 mt-1" aria-label="Αναφορές αναλύσεων">
+          <a class="nav-link {% if active == 'analytics' %}active{% endif %}" href="{% url 'analytics' %}"><span aria-hidden="true">·</span> Επισκόπηση</a>
+          <a class="nav-link {% if active == 'analytics-pl' %}active{% endif %}" href="{% url 'analytics-pl' %}"><span aria-hidden="true">·</span> Κέρδη &amp; ζημίες</a>
+          <a class="nav-link {% if active == 'analytics-cf' %}active{% endif %}" href="{% url 'analytics-cf' %}"><span aria-hidden="true">·</span> Ταμειακή ροή</a>
+          <a class="nav-link {% if active == 'analytics-tax' %}active{% endif %}" href="{% url 'analytics-tax' %}"><span aria-hidden="true">·</span> Φορολογική αναφορά</a>
+        </nav>{% endif %}
       </nav>
       <div class="sidebar-bottom"><div class="sidebar-note"><span class="eyebrow">ΠΕΡΙΘΩΡΙΟ ΑΝΑΠΤΥΞΗΣ</span><p>Καθαρή εικόνα του σήμερα.<br>Καλύτερο πλάνο για το αύριο.</p></div><a class="nav-link {% if active == 'profile' %}active{% endif %}" href="{% url 'profile-settings' %}"><span aria-hidden="true">⚙</span> Ρυθμίσεις χώρου εργασίας</a></div>
     </div>

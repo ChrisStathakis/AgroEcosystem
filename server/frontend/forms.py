@@ -1,11 +1,13 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import get_language
 
 from expenses.models import Expense, ExpenseCategory, Vendor
-from farm.models import Farm, FarmTask, TaskCategory, TreePlanting, TreeType
-from incomes.models import Customer, Income, IncomeCategory
+from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
+from incomes.models import Customer, Income, IncomeCategory, IncomeFarmAllocation
 from profiles.models import Profile
 
 
@@ -41,6 +43,7 @@ EL_FIELD_LABELS = {
     "customer": "Πελάτης",
     "document_type": "Τύπος παραστατικού",
     "include_in_tax": "Συμπερίληψη στην εφορία",
+    "is_archived": "Αρχειοθετημένο",
     "description": "Περιγραφή",
     "name": "Όνομα",
     "email": "Email",
@@ -51,6 +54,9 @@ EL_FIELD_LABELS = {
     "active": "Ενεργή",
     "tree_type": "Είδος δέντρου",
     "count": "Πλήθος δέντρων",
+    "action": "Κίνηση",
+    "quantity": "Πλήθος",
+    "effective_date": "Ημερομηνία κίνησης",
     "planted_on": "Ημερομηνία φύτευσης",
     "planting": "Ομάδα δέντρων",
     "expense": "Σχετικό έξοδο",
@@ -58,6 +64,13 @@ EL_FIELD_LABELS = {
     "q": "Αναζήτηση",
     "start": "Από",
     "end": "Έως",
+    "year": "Έτος",
+    "expense_category": "Κατηγορία εξόδων",
+    "income_category": "Κατηγορία εσόδων",
+    "vendor": "Προμηθευτής",
+    "customer": "Πελάτης",
+    "document_type": "Τύπος παραστατικού",
+    "tax": "Εφορία",
 }
 
 EL_DOCUMENT_CHOICES = [("invoice", "Τιμολόγιο"), ("receipt", "Απόδειξη")]
@@ -80,12 +93,15 @@ def apply_greek_labels(form):
                 field.empty_label = "Όλες οι φάρμες"
             elif name == "planting":
                 field.empty_label = "Όλες οι ομάδες δέντρων"
-            elif name == "category":
+            elif name in ("category", "expense_category", "income_category"):
                 field.empty_label = "Όλες οι κατηγορίες"
             elif name in ("vendor", "customer", "expense"):
                 field.empty_label = "— Καμία επιλογή —"
         if name == "document_type" and isinstance(field, forms.ChoiceField):
             field.choices = [c for c in field.choices if not c[0]] + EL_DOCUMENT_CHOICES if any(not c[0] for c in field.choices) else EL_DOCUMENT_CHOICES
+        if name == "tax" and isinstance(field, forms.ChoiceField):
+            has_empty = any(not c[0] or c[0] == "all" for c in field.choices)
+            field.choices = ([("all", "Όλα")] if has_empty else []) + [("taxed", "Μόνο με σήμανση"), ("untaxed", "Χωρίς σήμανση")]
     return form
 
 
@@ -151,15 +167,75 @@ class FarmForm(OwnedForm):
 class ExpenseForm(OwnedForm):
     class Meta:
         model = Expense
-        fields = ["title", "date", "amount", "farm", "category", "vendor", "document_type", "include_in_tax", "description"]
+        fields = ["title", "date", "amount", "farm", "category", "vendor", "document_type", "include_in_tax", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
 
 
 class IncomeForm(OwnedForm):
     class Meta:
         model = Income
-        fields = ["title", "date", "amount", "farm", "category", "customer", "document_type", "include_in_tax", "description"]
+        fields = ["title", "date", "amount", "category", "customer", "document_type", "include_in_tax", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
+
+
+class IncomeAllocationForm(forms.ModelForm):
+    class Meta:
+        model = IncomeFarmAllocation
+        fields = ["farm", "amount"]
+
+    def __init__(self, *args, profile, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.profile = profile
+        self.instance.profile = profile
+        self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        style_fields(self.fields)
+        apply_greek_labels(self)
+
+    def clean_amount(self):
+        amount = self.cleaned_data["amount"]
+        if amount <= 0:
+            raise ValidationError("Εισάγετε ποσό κατανομής μεγαλύτερο του μηδενός." if in_greek() else "Enter an allocation greater than zero.")
+        return amount
+
+
+class BaseIncomeAllocationFormSet(forms.BaseInlineFormSet):
+    def __init__(self, *args, **kwargs):
+        self.profile = kwargs.get("form_kwargs", {}).get("profile")
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        farms = set()
+        total = 0
+        for form in self.forms:
+            if not form.cleaned_data or form.cleaned_data.get("DELETE"):
+                continue
+            farm = form.cleaned_data.get("farm")
+            amount = form.cleaned_data.get("amount")
+            if farm in farms:
+                raise ValidationError("Each farm can be selected only once." if not in_greek() else "Κάθε φάρμα μπορεί να επιλεγεί μόνο μία φορά.")
+            if farm:
+                farms.add(farm)
+            if amount:
+                total += amount
+        income_amount = self.instance.amount or 0
+        if total > income_amount:
+            raise ValidationError("Farm allocations cannot exceed the income amount." if not in_greek() else "Οι κατανομές δεν μπορούν να ξεπερνούν το ποσό του εσόδου.")
+
+    def save_new(self, form, commit=True):
+        obj = super().save_new(form, commit=False)
+        obj.profile = self.profile
+        if commit:
+            obj.save()
+        return obj
+
+
+IncomeAllocationFormSet = forms.inlineformset_factory(
+    Income, IncomeFarmAllocation, form=IncomeAllocationForm,
+    formset=BaseIncomeAllocationFormSet, extra=3, can_delete=True,
+)
 
 
 class VendorForm(OwnedForm):
@@ -200,9 +276,35 @@ class TreePlantingForm(OwnedForm):
 
     def clean_count(self):
         count = self.cleaned_data["count"]
-        if count <= 0:
-            raise ValidationError("Εισάγετε αριθμό δέντρων μεγαλύτερο του μηδενός." if in_greek() else "Enter a number of trees greater than zero.")
+        if count < 0:
+            raise ValidationError("Εισάγετε αριθμό δέντρων μη αρνητικό." if in_greek() else "Enter a non-negative number of trees.")
         return count
+
+
+class TreeMovementForm(forms.Form):
+    farm = forms.ModelChoiceField(queryset=Farm.objects.none())
+    tree_type = forms.ModelChoiceField(queryset=TreeType.objects.none())
+    action = forms.ChoiceField(choices=TreeInventoryMovement.ACTIONS)
+    quantity = forms.IntegerField(min_value=1)
+    effective_date = forms.DateField(widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+                                     initial=timezone.localdate)
+    notes = forms.CharField(required=False, widget=forms.Textarea)
+
+    def __init__(self, *args, profile, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.profile = profile
+        self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        self.fields["tree_type"].queryset = TreeType.objects.filter(profile=profile)
+        style_fields(self.fields)
+        apply_greek_labels(self)
+        if in_greek():
+            self.fields["action"].choices = [("add", "Προσθήκη"), ("remove", "Αφαίρεση")]
+
+    def clean_quantity(self):
+        quantity = self.cleaned_data["quantity"]
+        if quantity <= 0:
+            raise ValidationError("Εισάγετε πλήθος μεγαλύτερο του μηδενός." if in_greek() else "Enter a quantity greater than zero.")
+        return quantity
 
 
 class TaskCategoryForm(OwnedForm):
@@ -226,13 +328,17 @@ class FarmTaskForm(OwnedForm):
         except (Farm.DoesNotExist, ValueError, TypeError):
             farm = None
         if "planting" in self.fields:
-            queryset = TreePlanting.objects.select_related("farm", "tree_type")
+            queryset = TreePlanting.objects.select_related("farm", "tree_type").filter(count__gt=0)
+            if self.instance.planting_id:
+                queryset = TreePlanting.objects.select_related("farm", "tree_type").filter(
+                    Q(count__gt=0) | Q(pk=self.instance.planting_id))
             if farm is not None:
                 queryset = queryset.filter(farm=farm)
             self.fields["planting"].queryset = queryset.filter(profile=self.instance.profile)
             self.fields["planting"].required = False
         if "expense" in self.fields:
-            expenses = Expense.objects.select_related("farm")
+            expenses = Expense.objects.select_related("farm").filter(
+                Q(is_archived=False) | Q(pk=getattr(self.instance, "expense_id", None)))
             if farm is not None:
                 expenses = expenses.filter(farm=farm)
             self.fields["expense"].queryset = expenses.filter(profile=self.instance.profile)
@@ -305,6 +411,60 @@ class TaskFilterForm(forms.Form):
         planting = data.get("planting")
         if farm and planting and planting.farm_id != farm.id:
             raise ValidationError("Η ομάδα δέντρων πρέπει να ανήκει στην επιλεγμένη φάρμα." if in_greek() else "The tree group must belong to the selected farm.")
+        return data
+
+
+class AnalyticsFilterForm(forms.Form):
+    """Full-dimension filters shared by the analytics overview and reports."""
+
+    year = forms.ChoiceField(required=False, label="Year", choices=[])
+    start = forms.DateField(required=False, label="From", widget=forms.DateInput(attrs={"type": "date"}))
+    end = forms.DateField(required=False, label="To", widget=forms.DateInput(attrs={"type": "date"}))
+    farm = forms.ModelChoiceField(queryset=Farm.objects.none(), required=False, empty_label="All farms")
+    expense_category = forms.ModelChoiceField(queryset=ExpenseCategory.objects.none(), required=False,
+                                              empty_label="All expense categories")
+    income_category = forms.ModelChoiceField(queryset=IncomeCategory.objects.none(), required=False,
+                                             empty_label="All income categories")
+    vendor = forms.ModelChoiceField(queryset=Vendor.objects.none(), required=False, empty_label="All vendors")
+    customer = forms.ModelChoiceField(queryset=Customer.objects.none(), required=False, empty_label="All customers")
+    document_type = forms.ChoiceField(required=False, label="Document",
+                                      choices=[("", "All documents"), ("invoice", "Invoice"), ("receipt", "Receipt")])
+    tax = forms.ChoiceField(required=False, label="Tax",
+                            choices=[("all", "All records"), ("taxed", "Tax flagged only"), ("untaxed", "Unflagged only")])
+
+    def __init__(self, *args, profile, **kwargs):
+        super().__init__(*args, **kwargs)
+        from analytics.services import available_years
+        from django.utils import timezone as _tz
+        years = available_years(profile)
+        self.fields["year"].choices = [("", "Custom range" if self.data.get("start") or self.data.get("end") else "Select year")] + [
+            (str(y), str(y)) for y in years]
+        # Default the dropdown to the current year on unbound forms.
+        if not self.is_bound:
+            self.fields["year"].initial = str(_tz.localdate().year)
+        self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        self.fields["expense_category"].queryset = ExpenseCategory.objects.filter(profile=profile)
+        self.fields["income_category"].queryset = IncomeCategory.objects.filter(profile=profile)
+        self.fields["vendor"].queryset = Vendor.objects.filter(profile=profile)
+        self.fields["customer"].queryset = Customer.objects.filter(profile=profile)
+        style_fields(self.fields)
+        apply_greek_labels(self)
+        if in_greek():
+            self.fields["year"].choices = [("", "Επιλέξτε έτος")] + [(str(y), str(y)) for y in years]
+
+    def clean_year(self):
+        value = self.cleaned_data.get("year")
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ValidationError("Επιλέξτε έγκυρο έτος." if in_greek() else "Select a valid year.")
+
+    def clean(self):
+        data = super().clean()
+        if data.get("start") and data.get("end") and data["start"] > data["end"]:
+            raise ValidationError("Η τελική ημερομηνία πρέπει να είναι ίδια ή μεταγενέστερη της αρχικής." if in_greek() else "The end date must be on or after the start date.")
         return data
 
 

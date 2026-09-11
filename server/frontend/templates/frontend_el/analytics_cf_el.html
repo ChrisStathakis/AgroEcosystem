@@ -1,0 +1,26 @@
+{% extends 'frontend_el/base_el.html' %}
+{% block title %}Ταμειακή ροή{% endblock %}
+{% block breadcrumb %}Ταμειακή ροή{% endblock %}
+{% block content %}
+<div class="page-header"><div><div class="eyebrow mb-2">ΑΝΑΦΟΡΕΣ · ΤΑΜΕΙΑΚΗ ΡΟΗ</div><h1>Χρήματα μέσα, χρήματα έξω.</h1><p>Μηνιαίες ροές και σωρευτικό υπόλοιπο για {{ report.period_label }}.</p></div><span class="pill">{{ report.period_label }}</span></div>
+{% if print_mode %}<style>@media print{.sidebar,.topbar,.page-footer,.no-print{display:none!important}.app-main{margin-left:0}.content{padding:0}}</style>{% endif %}
+{% include 'frontend_el/partials/analytics_tabs_el.html' %}
+{% include 'frontend_el/partials/analytics_filters_el.html' %}
+<section class="panel mb-4"><div class="panel-heading"><div><h2>Σωρευτικό υπόλοιπο</h2><p>Τρέχον καθαρό σύνολο στην περίοδο</p></div></div><div class="px-4 pb-4"><div style="position:relative;height:220px"><canvas id="chart-cashflow" role="img" aria-label="Γράφημα σωρευτικού υπολοίπου"></canvas></div></div></section>
+<section class="panel mb-4"><div class="panel-heading"><h2>Μήνα προς μήνα</h2></div><div class="table-wrap"><table class="table"><caption class="visually-hidden">Μηνιαία ταμειακή ροή και σωρευτικό υπόλοιπο για {{ report.period_label }}</caption><thead><tr><th scope="col">Μήνας</th><th scope="col" class="text-end">Εισροές</th><th scope="col" class="text-end">Εκροές</th><th scope="col" class="text-end">Καθαρό</th><th scope="col" class="text-end">Σωρευτικό</th></tr></thead><tbody>{% for month in report.rows %}<tr><th scope="row">{{ month.full_label }}</th><td class="text-end numeric">{{ month.income|floatformat:'2g' }}</td><td class="text-end numeric">{{ month.expense|floatformat:'2g' }}</td><td class="text-end numeric {% if month.balance < 0 %}negative{% else %}positive{% endif %}">{{ month.balance|floatformat:'2g' }}</td><td class="text-end numeric {% if month.running < 0 %}negative{% else %}positive{% endif %}">{{ month.running|floatformat:'2g' }}</td></tr>{% empty %}<tr><td colspan="5" class="text-secondary">Καμία εγγραφή δεν ταιριάζει με αυτά τα φίλτρα.</td></tr>{% endfor %}</tbody><tfoot><tr class="fw-semibold"><th scope="row">Σύνολο περιόδου</th><td class="text-end numeric">{{ report.income_total|floatformat:'2g' }}</td><td class="text-end numeric">{{ report.expense_total|floatformat:'2g' }}</td><td class="text-end numeric">{{ report.net|floatformat:'2g' }}</td><td></td></tr></tfoot></table></div></section>
+{{ chart_data|json_script:"chart-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  var el = document.getElementById("chart-data");
+  if (!el || typeof Chart === "undefined") return;
+  var data = JSON.parse(el.textContent);
+  var canvas = document.getElementById("chart-cashflow");
+  if (!canvas) return;
+  new Chart(canvas, {type: "line", data: {labels: data.labels, datasets: [
+    {label: "Μηνιαίο καθαρό", data: data.flows, borderColor: "#c4a967", backgroundColor: "transparent", tension: .3},
+    {label: "Σωρευτικό", data: data.running, borderColor: "#244b3b", backgroundColor: "rgba(196,169,103,.25)", fill: true, tension: .3}
+  ]}, options: {responsive: true, maintainAspectRatio: false, scales: {x: {grid: {display: false}}, y: {grid: {color: "#e2e6dd"}}}}});
+})();
+</script>
+{% endblock %}

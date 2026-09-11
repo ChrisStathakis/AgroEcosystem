@@ -102,6 +102,49 @@ class TreePlanting(models.Model):
         return f"{self.farm} — {self.tree_type} ({self.count})"
 
 
+class TreeInventoryMovement(models.Model):
+    """An immutable, dated change to a farm/tree-type inventory balance."""
+
+    ADD = "add"
+    REMOVE = "remove"
+    ACTIONS = ((ADD, "Add"), (REMOVE, "Remove"))
+
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="tree_inventory_movements", editable=False,
+        help_text="Profile that owns this movement.",
+    )
+    planting = models.ForeignKey(
+        TreePlanting, on_delete=models.PROTECT, related_name="movements",
+        help_text="Tree group whose balance changed.",
+    )
+    action = models.CharField(max_length=6, choices=ACTIONS, help_text="Whether trees were added or removed.")
+    quantity = models.PositiveIntegerField(help_text="Number of trees moved.")
+    effective_date = models.DateField(help_text="Date on which the movement occurred.")
+    notes = models.TextField(blank=True, help_text="Optional explanation for this movement.")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When this movement was recorded.")
+
+    class Meta:
+        ordering = ["-effective_date", "-created_at", "-pk"]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.action not in {self.ADD, self.REMOVE}:
+            raise ValidationError({"action": "Choose whether trees were added or removed."})
+        if self.planting_id and self.profile_id and self.planting.profile_id != self.profile_id:
+            raise ValidationError({"planting": "Tree group must belong to the same profile."})
+        if self.quantity is not None and self.quantity <= 0:
+            raise ValidationError({"quantity": "Movement quantity must be greater than zero."})
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("Tree inventory movements are immutable; record a correction instead.")
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        sign = "+" if self.action == self.ADD else "-"
+        return f"{self.planting} {sign}{self.quantity} ({self.effective_date})"
+
+
 class TaskCategory(models.Model):
     """A reusable task category owned by a profile (e.g. Potisma, Lipasma)."""
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Farm, FarmTask, TaskCategory, TreePlanting, TreeType
+from .models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 
 
 class ProfileOwnedAdmin(admin.ModelAdmin):
@@ -33,6 +33,31 @@ class TreePlantingAdmin(ProfileOwnedAdmin):
     list_display = ("farm", "tree_type", "count", "planted_on", "updated_at")
     list_filter = ("tree_type",)
     search_fields = ("farm__title", "tree_type__name")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(TreeInventoryMovement)
+class TreeInventoryMovementAdmin(ProfileOwnedAdmin):
+    list_display = ("planting", "action", "quantity", "effective_date", "created_at")
+    list_filter = ("action", "effective_date")
+    search_fields = ("planting__farm__title", "planting__tree_type__name", "notes")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(TaskCategory)

@@ -56,7 +56,7 @@ export async function deleteFarm(id: number): Promise<void> {
     `SELECT (SELECT COUNT(*) FROM tree_plantings WHERE farm_id = ?) +
      (SELECT COUNT(*) FROM farm_tasks WHERE farm_id = ?) +
      (SELECT COUNT(*) FROM expenses WHERE farm_id = ?) +
-     (SELECT COUNT(*) FROM incomes WHERE farm_id = ?) AS n`,
+     (SELECT COUNT(*) FROM income_farm_allocations WHERE farm_id = ?) AS n`,
     [id, id, id, id],
   );
   if ((refs?.n ?? 0) > 0) throw new Error('Cannot delete: this farm still has trees, tasks or transactions.');

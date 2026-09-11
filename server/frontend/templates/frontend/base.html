@@ -19,7 +19,13 @@
       <nav class="nav flex-column gap-1" aria-label="Main navigation">
         <a class="nav-link {% if active == 'dashboard' %}active{% endif %}" {% if active == 'dashboard' %}aria-current="page"{% endif %} href="{% url 'home' %}"><span aria-hidden="true">▦</span> Overview</a>
         {% for slug, label in navigation %}<a class="nav-link {% if active == slug %}active{% endif %}" {% if active == slug %}aria-current="page"{% endif %} href="{% url 'record-list' slug %}"><span aria-hidden="true">{% if slug == 'farms' %}⌂{% elif slug == 'expenses' %}↗{% elif slug == 'incomes' %}↙{% else %}·{% endif %}</span>{{ label }}</a>{% endfor %}
-        <a class="nav-link {% if active == 'analytics' %}active{% endif %}" {% if active == 'analytics' %}aria-current="page"{% endif %} href="{% url 'analytics' %}"><span aria-hidden="true">▥</span> Analytics</a>
+        <a class="nav-link {% if active|slice:':9' == 'analytics' %}active{% endif %}" {% if active|slice:':9' == 'analytics' %}aria-current="page"{% endif %} href="{% url 'analytics' %}"><span aria-hidden="true">▥</span> Analytics</a>
+        {% if active|slice:':9' == 'analytics' %}<nav class="nav flex-column gap-1 ms-4 mt-1" aria-label="Analytics reports">
+          <a class="nav-link {% if active == 'analytics' %}active{% endif %}" href="{% url 'analytics' %}"><span aria-hidden="true">·</span> Overview</a>
+          <a class="nav-link {% if active == 'analytics-pl' %}active{% endif %}" href="{% url 'analytics-pl' %}"><span aria-hidden="true">·</span> Profit &amp; loss</a>
+          <a class="nav-link {% if active == 'analytics-cf' %}active{% endif %}" href="{% url 'analytics-cf' %}"><span aria-hidden="true">·</span> Cash flow</a>
+          <a class="nav-link {% if active == 'analytics-tax' %}active{% endif %}" href="{% url 'analytics-tax' %}"><span aria-hidden="true">·</span> Tax report</a>
+        </nav>{% endif %}
       </nav>
       <div class="sidebar-bottom"><div class="sidebar-note"><span class="eyebrow">ROOM TO GROW</span><p>A clear view of today.<br>A better plan for tomorrow.</p></div><a class="nav-link {% if active == 'profile' %}active{% endif %}" href="{% url 'profile-settings' %}"><span aria-hidden="true">⚙</span> Workspace settings</a></div>
     </div>

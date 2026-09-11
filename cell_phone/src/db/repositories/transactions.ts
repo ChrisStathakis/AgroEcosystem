@@ -1,5 +1,5 @@
 import { getDb } from '../client';
-import { nowISO, SINGLE_PROFILE_ID, type Expense, type Income } from '../types';
+import { nowISO, SINGLE_PROFILE_ID, type Expense, type Income, type IncomeFarmAllocation } from '../types';
 import type { SQLiteBindValue } from 'expo-sqlite';
 import { assertISODate, assertNonEmpty, assertPositiveAmount } from '../../lib/validation';
 
@@ -10,7 +10,7 @@ export interface TxnFilters {
   end?: string;
 }
 
-function whereClause(filters: TxnFilters, alias: string): { sql: string; params: SQLiteBindValue[] } {
+function whereClause(filters: TxnFilters, alias: string, income = false): { sql: string; params: SQLiteBindValue[] } {
   let sql = `${alias}.profile_id = ?`;
   const params: SQLiteBindValue[] = [SINGLE_PROFILE_ID];
   if (filters.q?.trim()) {
@@ -19,7 +19,9 @@ function whereClause(filters: TxnFilters, alias: string): { sql: string; params:
     params.push(q, q);
   }
   if (filters.farm_id) {
-    sql += ` AND ${alias}.farm_id = ?`;
+    sql += income
+      ? ` AND EXISTS (SELECT 1 FROM income_farm_allocations ia WHERE ia.income_id = ${alias}.id AND ia.farm_id = ?)`
+      : ` AND ${alias}.farm_id = ?`;
     params.push(filters.farm_id);
   }
   if (filters.start) {
@@ -51,10 +53,13 @@ export async function listExpenses(filters: TxnFilters = {}): Promise<Expense[]>
 
 export async function listIncomes(filters: TxnFilters = {}): Promise<Income[]> {
   const db = getDb();
-  const { sql, params } = whereClause(filters, 'i');
+  const { sql, params } = whereClause(filters, 'i', true);
   return db.getAllAsync<Income>(
-    `SELECT i.*, f.title AS farm_title, c.name AS category_name, v.name AS contact_name
-     FROM incomes i JOIN farms f ON f.id = i.farm_id JOIN income_categories c ON c.id = i.category_id
+    `SELECT i.*, c.name AS category_name, v.name AS contact_name,
+       (SELECT GROUP_CONCAT(f.title || ' (' || printf('%.2f', ia.amount) || ')', ', ')
+          FROM income_farm_allocations ia JOIN farms f ON f.id = ia.farm_id WHERE ia.income_id = i.id) AS farm_summary,
+       i.amount - COALESCE((SELECT SUM(ia.amount) FROM income_farm_allocations ia WHERE ia.income_id = i.id), 0) AS unallocated_amount
+     FROM incomes i JOIN income_categories c ON c.id = i.category_id
      LEFT JOIN customers v ON v.id = i.customer_id WHERE ${sql} ORDER BY i.date DESC, i.id DESC`,
     params,
   );
@@ -70,7 +75,21 @@ export interface TxnInput {
   date: string;
   document_type: 'invoice' | 'receipt';
   include_in_tax: boolean;
+  allocations?: Array<{ farm_id: number; amount: number }>;
 }
+
+export async function listIncomeAllocations(incomeId: number): Promise<IncomeFarmAllocation[]> {
+  const db = getDb();
+  return db.getAllAsync<IncomeFarmAllocation>(
+    `SELECT ia.*, f.title AS farm_title FROM income_farm_allocations ia JOIN farms f ON f.id = ia.farm_id
+     WHERE ia.profile_id = ? AND ia.income_id = ? ORDER BY f.title, ia.id`,
+    [SINGLE_PROFILE_ID, incomeId],
+  );
+}
+
+export type IncomeInput = Omit<TxnInput, 'farm_id'> & {
+  allocations?: Array<{ farm_id: number; amount: number }>;
+};
 
 export async function createExpense(input: TxnInput): Promise<number> {
   assertNonEmpty(input.title, 'Title');
@@ -86,18 +105,42 @@ export async function createExpense(input: TxnInput): Promise<number> {
   return res.lastInsertRowId;
 }
 
-export async function createIncome(input: TxnInput): Promise<number> {
+export async function createIncome(input: IncomeInput): Promise<number> {
   assertNonEmpty(input.title, 'Title');
   assertPositiveAmount(input.amount);
   assertISODate(input.date);
+  const allocations = input.allocations ?? [];
+  const farms = new Set<number>();
+  let allocated = 0;
+  for (const allocation of allocations) {
+    if (farms.has(allocation.farm_id)) throw new Error('Each farm can be selected only once.');
+    if (!Number.isFinite(allocation.amount) || allocation.amount <= 0) throw new Error('Allocation amounts must be greater than zero.');
+    farms.add(allocation.farm_id);
+    allocated += allocation.amount;
+  }
+  if (allocated > input.amount + 0.000001) throw new Error('Farm allocations cannot exceed the income amount.');
   const db = getDb();
-  const now = nowISO();
-  const res = await db.runAsync(
-    `INSERT INTO incomes (profile_id, farm_id, category_id, customer_id, title, description, amount, date, document_type, include_in_tax, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [SINGLE_PROFILE_ID, input.farm_id, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, now, now],
-  );
-  return res.lastInsertRowId;
+  let incomeId = 0;
+  await db.withTransactionAsync(async () => {
+    for (const allocation of allocations) {
+      const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [allocation.farm_id]);
+      if (!farm || farm.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected farm must belong to this workspace.');
+    }
+    const now = nowISO();
+    const res = await db.runAsync(
+      `INSERT INTO incomes (profile_id, category_id, customer_id, title, description, amount, date, document_type, include_in_tax, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [SINGLE_PROFILE_ID, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, now, now],
+    );
+    incomeId = res.lastInsertRowId;
+    for (const allocation of allocations) {
+      await db.runAsync(
+        'INSERT INTO income_farm_allocations (profile_id, income_id, farm_id, amount) VALUES (?, ?, ?, ?)',
+        [SINGLE_PROFILE_ID, incomeId, allocation.farm_id, allocation.amount],
+      );
+    }
+  });
+  return incomeId;
 }
 
 export async function deleteExpense(id: number): Promise<void> {

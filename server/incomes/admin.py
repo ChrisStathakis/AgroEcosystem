@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Customer, Income, IncomeCategory
+from .models import Customer, Income, IncomeCategory, IncomeFarmAllocation
 
 
 class ProfileScopedAdmin(admin.ModelAdmin):
@@ -28,10 +28,17 @@ class IncomeCategoryAdmin(ProfileScopedAdmin):
 
 @admin.register(Income)
 class IncomeAdmin(ProfileScopedAdmin):
-    list_display = ("title", "farm", "category", "customer", "amount", "date", "document_type", "include_in_tax")
-    list_filter = ("document_type", "include_in_tax", "category")
-    search_fields = ("title", "description", "farm__title")
-    autocomplete_fields = ("farm", "category", "customer")
+    list_display = ("title", "farm", "category", "customer", "amount", "date", "document_type", "include_in_tax", "is_archived")
+    list_filter = ("document_type", "include_in_tax", "is_archived", "category")
+    search_fields = ("title", "description", "allocations__farm__title")
+    autocomplete_fields = ("category", "customer")
+
+
+@admin.register(IncomeFarmAllocation)
+class IncomeFarmAllocationAdmin(ProfileScopedAdmin):
+    list_display = ("income", "farm", "amount")
+    list_filter = ("farm",)
+    search_fields = ("income__title", "farm__title")
 
 
 @admin.register(Customer)
