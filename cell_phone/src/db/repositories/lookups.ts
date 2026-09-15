@@ -1,5 +1,5 @@
 import { getDb } from '../client';
-import { SINGLE_PROFILE_ID, type NamedRow } from '../types';
+import { nowISO, SINGLE_PROFILE_ID, type NamedRow } from '../types';
 import { assertNonEmpty } from '../../lib/validation';
 
 export type LookupTable = 'tree_types' | 'task_categories' | 'expense_categories' | 'income_categories';
@@ -23,11 +23,23 @@ export async function createLookup(table: LookupTable, name: string): Promise<nu
   const dated = table === 'tree_types' || table === 'task_categories';
   try {
     const res = dated
-      ? await db.runAsync(`INSERT INTO ${table} (profile_id, name, created_at) VALUES (?, ?, datetime('now'))`, [
-          SINGLE_PROFILE_ID, name.trim(),
+      ? await db.runAsync(`INSERT INTO ${table} (profile_id, name, created_at) VALUES (?, ?, ?)`, [
+          SINGLE_PROFILE_ID, name.trim(), nowISO(),
         ])
       : await db.runAsync(`INSERT INTO ${table} (profile_id, name) VALUES (?, ?)`, [SINGLE_PROFILE_ID, name.trim()]);
     return res.lastInsertRowId;
+  } catch (e: any) {
+    if (String(e?.message).includes('UNIQUE')) throw new Error('This name already exists.');
+    throw e;
+  }
+}
+
+export async function updateLookup(table: LookupTable, id: number, name: string): Promise<void> {
+  assertNonEmpty(name, 'Name');
+  try {
+    await getDb().runAsync(`UPDATE ${table} SET name = ? WHERE id = ? AND profile_id = ?`, [
+      name.trim(), id, SINGLE_PROFILE_ID,
+    ]);
   } catch (e: any) {
     if (String(e?.message).includes('UNIQUE')) throw new Error('This name already exists.');
     throw e;

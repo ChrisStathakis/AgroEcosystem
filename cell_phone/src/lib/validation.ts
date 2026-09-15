@@ -23,6 +23,18 @@ export function assertSameFarm(selectedFarmId: number, relatedFarmId: number, la
   if (selectedFarmId !== relatedFarmId) throw new Error(`${label} must belong to the selected farm.`);
 }
 
+export function assertAllocationTotal(allocations: Array<{ farm_id: number; amount: number }>, incomeAmount: number): void {
+  const seen = new Set<number>();
+  let total = 0;
+  for (const a of allocations) {
+    if (seen.has(a.farm_id)) throw new Error('Each farm can be selected only once.');
+    if (!Number.isFinite(a.amount) || a.amount <= 0) throw new Error('Allocation amounts must be greater than zero.');
+    seen.add(a.farm_id);
+    total += a.amount;
+  }
+  if (total > incomeAmount + 0.000001) throw new Error('Farm allocations cannot exceed the income amount.');
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export function assertISODate(value: string, field = 'Date'): void {
   if (!DATE_RE.test(value)) throw new Error(`${field} must be YYYY-MM-DD.`);

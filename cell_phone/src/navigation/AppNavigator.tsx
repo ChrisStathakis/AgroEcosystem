@@ -8,12 +8,26 @@ import { TasksScreen } from '../screens/TasksScreen';
 import { ExpensesScreen, IncomesScreen } from '../screens/TransactionsScreens';
 import { ContactsScreen, LookupsScreen } from '../screens/ContactsLookupsScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { DrawerContent } from './DrawerContent';
+import { theme } from '../components/theme';
 
 const Drawer = createDrawerNavigator();
 
 export function AppNavigator() {
   return (
-    <Drawer.Navigator initialRouteName="Overview" screenOptions={{ headerTintColor: '#244b3b' }}>
+    <Drawer.Navigator
+      initialRouteName="Overview"
+      drawerContent={(props) => <DrawerContent {...props} />}
+      screenOptions={{
+        headerTintColor: theme.pine,
+        headerStyle: { backgroundColor: '#F6F7F2' },
+        headerTitleStyle: { fontWeight: '800', fontSize: 16 },
+        headerShadowVisible: false,
+        drawerType: 'slide',
+        drawerStyle: { width: 300, backgroundColor: '#FAFAF6', borderTopRightRadius: 24, borderBottomRightRadius: 24 },
+        sceneStyle: { backgroundColor: theme.bg },
+      }}
+    >
       <Drawer.Screen name="Overview" component={OverviewScreen} />
       <Drawer.Screen name="Farms" component={FarmsScreen} />
       <Drawer.Screen name="Trees" component={TreesScreen} />

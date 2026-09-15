@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { SCHEMA_V3 } from './schema';
+import { SCHEMA_V4, SCHEMA_VERSION } from './schema';
 import { nowISO, SINGLE_PROFILE_ID } from './types';
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -21,7 +21,7 @@ export async function migrate(): Promise<void> {
   );
   if (hasTables?.n && version < 2) await migrateLegacyTreeHistory(database);
   if (hasIncomes?.n && version < 3) await migrateLegacyIncomeAllocations(database);
-  const statements = SCHEMA_V3.split(';')
+  const statements = SCHEMA_V4.split(';')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   // Run PRAGMA first, then the rest.
@@ -30,7 +30,10 @@ export async function migrate(): Promise<void> {
     if (stmt.toUpperCase().startsWith('PRAGMA')) continue;
     await database.execAsync(stmt + ';');
   }
-  await database.execAsync('PRAGMA user_version = 3;');
+  // v4: is_archived on expenses/incomes (server 0004/0005). CREATE TABLE IF NOT
+  // EXISTS won't add the column to old DBs, so patch explicitly.
+  await migrateIsArchived(database);
+  await database.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   const now = nowISO();
   await database.runAsync(
     'INSERT INTO profiles (id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING;',
@@ -56,6 +59,7 @@ async function migrateLegacyIncomeAllocations(database: SQLite.SQLiteDatabase): 
       date TEXT NOT NULL,
       document_type TEXT NOT NULL CHECK (document_type IN ('invoice','receipt')),
       include_in_tax INTEGER NOT NULL DEFAULT 1,
+      is_archived INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -150,4 +154,31 @@ export async function resetDatabase(): Promise<void> {
     'PRAGMA foreign_keys = OFF; DROP TABLE IF EXISTS farm_tasks; DROP TABLE IF EXISTS income_farm_allocations; DROP TABLE IF EXISTS incomes; DROP TABLE IF EXISTS expenses; DROP TABLE IF EXISTS tree_inventory_movements; DROP TABLE IF EXISTS tree_plantings; DROP TABLE IF EXISTS vendors; DROP TABLE IF EXISTS customers; DROP TABLE IF EXISTS expense_categories; DROP TABLE IF EXISTS income_categories; DROP TABLE IF EXISTS task_categories; DROP TABLE IF EXISTS tree_types; DROP TABLE IF EXISTS farms; DROP TABLE IF EXISTS profiles; PRAGMA foreign_keys = ON;',
   );
   await migrate();
+}
+
+async function tableHasColumn(
+  database: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const rows = await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  return rows.some((r) => r.name === column);
+}
+
+export async function migrateIsArchived(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Idempotent: old installs (v3) lack the column; fresh installs already have it.
+  for (const table of ['expenses', 'incomes'] as const) {
+    const exists = await database
+      .getFirstAsync<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [table],
+      )
+      .catch(() => ({ n: 0 as number }));
+    if (!exists?.n) continue;
+    if (!(await tableHasColumn(database, table, 'is_archived'))) {
+      await database.execAsync(
+        `ALTER TABLE ${table} ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;`,
+      );
+    }
+  }
 }

@@ -17,12 +17,15 @@ profile id=1, and inserts starter categories (`src/db/seed.ts`).
 | Django | Mobile |
 |---|---|
 | `frontend/views.home` | `src/screens/OverviewScreen.tsx` |
-| `analytics/services.financial_summary` | `src/db/repositories/analytics.ts` |
-| `frontend/views.analytics` | `src/screens/AnalyticsScreen.tsx` |
+| `analytics/services` (summary, breakdown, farm profit, cumulative, P&L, cash-flow, tax) | `src/db/repositories/analytics.ts` |
+| `frontend/views.analytics*` + `analytics_export` | `src/screens/AnalyticsScreen.tsx` (tabs + filters + CSV via `src/lib/csv.ts`) |
 | `RESOURCES` lists/forms/deletes | `Farms/Trees/Tasks/Transactions/Contacts/Lookups/Settings` screens |
 | `forms.py` validation | `src/lib/validation.ts` + repository guards |
 | `record_export` CSV | `src/lib/csv.ts` (share sheet) |
+| `frontend/backup.py` (v3 + replace/merge + destroy) | `src/db/backup.ts` + Settings backup section |
+| `RESOURCES_EL` / EL labels / month labels | `src/lib/i18n.ts` (EN/EL toggle in Settings) |
 | `User+Profile` auth | single local `profiles(id=1)` row |
+| `Expense.is_archived` / `Income.is_archived` | `is_archived` columns (schema v4, migrated) + archive toggles; hidden from task dropdowns |
 
 ## Notes
 

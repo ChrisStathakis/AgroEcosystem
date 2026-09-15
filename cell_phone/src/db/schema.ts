@@ -1,8 +1,11 @@
-// Current schema (v3). Ports Django constraints:
+// Current schema (v4). Ports Django constraints:
 // UNIQUE(profile,title/name), UNIQUE(farm,tree_type), PROTECT via
 // RESTRICT-equivalent checks in repositories (SQLite RESTRICT).
+// v4 adds is_archived to expenses/incomes (server 0004/0005):
+// archived rows stay in lists/reports but are hidden from task dropdowns.
 
-export const SCHEMA_V3 = `
+export const SCHEMA_VERSION = 4;
+export const SCHEMA_V4 = `
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -114,6 +117,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   date TEXT NOT NULL,
   document_type TEXT NOT NULL CHECK (document_type IN ('invoice','receipt')),
   include_in_tax INTEGER NOT NULL DEFAULT 0,
+  is_archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -130,6 +134,7 @@ CREATE TABLE IF NOT EXISTS incomes (
   date TEXT NOT NULL,
   document_type TEXT NOT NULL CHECK (document_type IN ('invoice','receipt')),
   include_in_tax INTEGER NOT NULL DEFAULT 1,
+  is_archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -160,3 +165,6 @@ CREATE TABLE IF NOT EXISTS farm_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_profile_date ON farm_tasks(profile_id, date);
 `;
+
+/** Back-compat alias: v3 code imports SCHEMA_V3. */
+export const SCHEMA_V3 = SCHEMA_V4;

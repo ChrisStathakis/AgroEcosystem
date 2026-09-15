@@ -7,11 +7,12 @@ const root = path.join(__dirname, '..');
 const mustExist = [
   'App.tsx', 'app.json', 'package.json', 'tsconfig.json',
   'src/db/schema.ts', 'src/db/client.ts', 'src/db/seed.ts', 'src/db/types.ts',
+  'src/db/backup.ts',
   'src/db/repositories/analytics.ts', 'src/db/repositories/farms.ts',
   'src/db/repositories/trees.ts', 'src/db/repositories/tasks.ts',
   'src/db/repositories/transactions.ts', 'src/db/repositories/contacts.ts',
   'src/db/repositories/lookups.ts',
-  'src/lib/validation.ts', 'src/lib/csv.ts',
+  'src/lib/validation.ts', 'src/lib/csv.ts', 'src/lib/i18n.ts',
   'src/navigation/AppNavigator.tsx',
 ];
 let failed = 0;
@@ -25,6 +26,12 @@ const schema = fs.readFileSync(path.join(root, 'src/db/schema.ts'), 'utf8');
 for (const t of ['farms', 'tree_plantings', 'farm_tasks', 'expenses', 'incomes', 'vendors', 'customers']) {
   if (!schema.includes(t)) {
     console.error('schema missing table: ' + t);
+    failed++;
+  }
+}
+for (const c of ['is_archived', 'income_farm_allocations', 'tree_inventory_movements']) {
+  if (!schema.includes(c)) {
+    console.error('schema missing feature: ' + c);
     failed++;
   }
 }

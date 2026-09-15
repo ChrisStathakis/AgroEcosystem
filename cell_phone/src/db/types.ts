@@ -84,6 +84,7 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   document_type: DocumentType;
   include_in_tax: number;
+  is_archived: number; // 0/1 — archived stays in lists/reports, hidden from task dropdowns
   created_at: string;
   updated_at: string;
   farm_title?: string;
@@ -102,6 +103,7 @@ export interface Income {
   date: string;
   document_type: DocumentType;
   include_in_tax: number;
+  is_archived: number; // 0/1 — archived stays in lists/reports, hidden from pickers
   created_at: string;
   updated_at: string;
   farm_title?: string;
@@ -138,14 +140,42 @@ export interface FarmTask {
 }
 
 export interface MonthlyRow {
+  year?: number;
+  month?: number;
   label: string;
+  full_label?: string;
   income: number;
   expense: number;
   balance: number;
 }
 
+export interface AnalyticsFilters {
+  year?: number | null;
+  start?: string | null;
+  end?: string | null;
+  farm_id?: number | null;
+  expense_category_id?: number | null;
+  income_category_id?: number | null;
+  vendor_id?: number | null;
+  customer_id?: number | null;
+  document_type?: '' | DocumentType | null;
+  tax?: 'all' | 'taxed' | 'untaxed' | null;
+}
+
+export interface CategoryTotal {
+  label: string;
+  total: number;
+}
+
+export interface CashFlowRow extends MonthlyRow {
+  running: number;
+}
+
 export interface FinancialSummary {
-  year: number;
+  year: number | null;
+  period_label: string;
+  start: string;
+  end: string;
   income_total: number;
   expense_total: number;
   balance: number;

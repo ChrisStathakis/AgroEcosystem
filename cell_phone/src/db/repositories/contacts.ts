@@ -1,5 +1,5 @@
 import { getDb } from '../client';
-import { nowISO, SINGLE_PROFILE_ID, type Customer, type Vendor } from '../types';
+import { SINGLE_PROFILE_ID, type Customer, type Vendor } from '../types';
 import { assertNonEmpty } from '../../lib/validation';
 
 async function listContacts<T>(table: 'vendors' | 'customers', query: string): Promise<T[]> {
@@ -33,6 +33,23 @@ export async function createContact(
   }
 }
 
+export async function updateContact(
+  table: 'vendors' | 'customers',
+  id: number,
+  input: { name: string; email?: string; phone?: string; address?: string; notes?: string },
+): Promise<void> {
+  assertNonEmpty(input.name, 'Name');
+  try {
+    await getDb().runAsync(
+      `UPDATE ${table} SET name = ?, email = ?, phone = ?, address = ?, notes = ? WHERE id = ? AND profile_id = ?`,
+      [input.name.trim(), input.email ?? '', input.phone ?? '', input.address ?? '', input.notes ?? '', id, SINGLE_PROFILE_ID],
+    );
+  } catch (e: any) {
+    if (String(e?.message).includes('UNIQUE')) throw new Error('This name already exists.');
+    throw e;
+  }
+}
+
 export async function deleteContact(table: 'vendors' | 'customers', id: number): Promise<void> {
   const db = getDb();
   const refTable = table === 'vendors' ? 'expenses' : 'incomes';
@@ -40,5 +57,4 @@ export async function deleteContact(table: 'vendors' | 'customers', id: number):
   const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM ${refTable} WHERE ${refCol} = ?`, [id]);
   if ((row?.n ?? 0) > 0) throw new Error('Cannot delete: still used by transactions.');
   await db.runAsync(`DELETE FROM ${table} WHERE id = ? AND profile_id = ?`, [id, SINGLE_PROFILE_ID]);
-  void nowISO;
 }
