@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
+import { QuickAdd, type QuickAddKind } from '../components/QuickAdd';
 import { useFocusEffect } from '@react-navigation/native';
 import { listPlantings, listTreeMovements, recordTreeMovement } from '../db/repositories/trees';
 import { listFarms } from '../db/repositories/farms';
@@ -26,6 +27,7 @@ export function TreesScreen() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [types, setTypes] = useState<NamedRow[]>([]);
   const [allPlantings, setAllPlantings] = useState<TreePlanting[]>([]);
+  const [quickAdd, setQuickAdd] = useState<QuickAddKind | null>(null);
 
   const refresh = useCallback(async () => {
     setRows(await listPlantings(farmId ?? undefined, q));
@@ -87,6 +89,9 @@ export function TreesScreen() {
           onChange={setFarmId}
           allowClear={false}
         />
+        <Pressable onPress={() => setQuickAdd({ type: 'farm' })} style={{ marginTop: -4, marginBottom: 10 }}>
+          <Text style={{ color: theme.pine, fontWeight: '800', fontSize: 13 }}>+ New farm</Text>
+        </Pressable>
         <Select
           label="Tree type"
           placeholder={types.length === 0 ? 'No tree types — add one first' : 'Select type…'}
@@ -94,6 +99,19 @@ export function TreesScreen() {
           options={types.map((x) => ({ id: x.id, label: x.name }))}
           onChange={setTypeId}
           allowClear={false}
+        />
+        <Pressable onPress={() => setQuickAdd({ type: 'lookup', table: 'tree_types', label: 'tree type' })} style={{ marginTop: -4, marginBottom: 10 }}>
+          <Text style={{ color: theme.pine, fontWeight: '800', fontSize: 13 }}>+ New tree type</Text>
+        </Pressable>
+        <QuickAdd
+          visible={quickAdd != null}
+          kind={quickAdd}
+          onClose={() => setQuickAdd(null)}
+          onCreated={(id) => {
+            if (quickAdd?.type === 'farm') setFarmId(id);
+            else setTypeId(id);
+            refresh();
+          }}
         />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <View style={{ flex: 1 }}><AppInput label="Quantity" value={count} onChangeText={setCount} keyboardType="number-pad" /></View>

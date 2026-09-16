@@ -93,9 +93,11 @@ export function SettingsScreen() {
     }
   };
 
+  const expectedDestroyName = name.trim() ? name.trim() : 'DELETE';
   const confirmDestroy = async () => {
-    if (!confirmName.trim()) {
-      Alert.alert('Confirm', 'Type workspace display name (or "DELETE") to confirm.');
+    // Mirrors server backup_destroy: require typing the exact workspace name (or DELETE when unnamed).
+    if (confirmName.trim() !== expectedDestroyName) {
+      Alert.alert('Confirm', `Type "${expectedDestroyName}" exactly to confirm deletion.`);
       return;
     }
     try {
@@ -106,6 +108,13 @@ export function SettingsScreen() {
     } catch (e: any) {
       Alert.alert('Error', e.message);
     }
+  };
+
+  const renderCounts = (data: Record<string, number> | null) => {
+    if (!data) return '…';
+    return Object.entries(data)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
   };
 
   return (
@@ -143,13 +152,13 @@ export function SettingsScreen() {
 
       <Card style={{ marginTop: 12 }}>
         <SectionTitle title="Backup" action={<Badge label={mode} tone="blue" />} />
-        <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Current rows: {counts ? JSON.stringify(counts) : '…'}</Text>
+        <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Current rows:{'\n'}{renderCounts(counts)}</Text>
         <AppButton title="Download backup (JSON)" icon="cloud-download-outline" variant="secondary" onPress={downloadBackup} />
         <View style={{ height: 8 }} />
         <AppButton title="Pick backup file (.json)" icon="folder-open-outline" variant="secondary" onPress={pickBackupFile} />
         <View style={{ height: 8 }} />
         <AppButton title="Preview current data" icon="eye-outline" variant="secondary" onPress={importDemoBackup} />
-        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Preview{pendingName ? ` (${pendingName})` : ''}: {JSON.stringify(preview)}</Text> : null}
+        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Preview{pendingName ? ` (${pendingName})` : ''}:{'\n'}{renderCounts(preview)}</Text> : null}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
           <View style={{ flex: 1 }}>
             <AppButton title={`Mode: ${mode}`} variant="secondary" onPress={() => setMode(mode === 'replace' ? 'merge' : 'replace')} />
@@ -163,7 +172,8 @@ export function SettingsScreen() {
 
       <Card style={{ marginTop: 12, backgroundColor: '#FFF5F3', borderColor: '#F0C9C0' }}>
         <Text style={{ fontWeight: '800', fontSize: 16, color: theme.danger }}>Danger zone</Text>
-        <AppInput value={confirmName} onChangeText={setConfirmName} placeholder="Type to confirm deletion" icon="warning-outline" />
+        <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Type "{expectedDestroyName}" exactly to delete every row in this workspace. This cannot be undone.</Text>
+        <AppInput value={confirmName} onChangeText={setConfirmName} placeholder={expectedDestroyName} icon="warning-outline" />
         <AppButton title="Delete all workspace data" variant="danger" icon="trash-outline" onPress={confirmDestroy} />
       </Card>
     </Screen>

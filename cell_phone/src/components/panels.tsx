@@ -83,6 +83,82 @@ export function HeroBalance({ balance, income, expense }: { balance: number; inc
   );
 }
 
+export function MiniBars({ items, format }: { items: Array<{ label: string; value: number; tone?: 'green' | 'red' | 'neutral' }>; format?: (n: number) => string }) {
+  const max = Math.max(1, ...items.map((x) => Math.abs(x.value)));
+  const fmtFn = format ?? fmt;
+  return (
+    <View style={{ gap: 8 }}>
+      {items.map((item) => (
+        <View key={item.label}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontWeight: '700', color: theme.ink, fontSize: 13, flex: 1 }} numberOfLines={1}>{item.label}</Text>
+            <Text style={{ fontWeight: '800', color: item.tone === 'red' ? theme.danger : theme.ink, fontSize: 13 }}>{fmtFn(item.value)}</Text>
+          </View>
+          <View style={{ height: 8, borderRadius: 5, backgroundColor: '#EFF1EA', marginTop: 5, overflow: 'hidden' }}>
+            <View
+              style={{
+                height: 8,
+                borderRadius: 5,
+                width: `${Math.max(4, (Math.abs(item.value) / max) * 100)}%`,
+                backgroundColor: item.tone === 'red' ? theme.danger : item.tone === 'neutral' ? theme.muted : theme.pine,
+              }}
+            />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function CategoryBars({ title, items }: { title: string; items: Array<{ label: string; total: number }> }) {
+  if (items.length === 0) return null;
+  return (
+    <Card>
+      <Text style={chartStyles.title}>{title}</Text>
+      <View style={{ height: 8 }} />
+      <MiniBars items={items.slice(0, 8).map((c) => ({ label: c.label, value: c.total }))} />
+    </Card>
+  );
+}
+
+export function FarmProfitBars({ rows }: { rows: Array<{ farm: string; net: number }> }) {
+  if (rows.length === 0) return null;
+  return (
+    <Card>
+      <Text style={chartStyles.title}>Net per farm</Text>
+      <View style={{ height: 8 }} />
+      <MiniBars items={rows.map((r) => ({ label: r.farm, value: r.net, tone: r.net < 0 ? 'red' as const : 'green' as const }))} />
+    </Card>
+  );
+}
+
+export function CumulativeBars({ labels, totals }: { labels: string[]; totals: number[] }) {
+  if (labels.length === 0) return null;
+  const min = Math.min(0, ...totals);
+  const max = Math.max(1, ...totals.map((x) => x - min));
+  return (
+    <Card>
+      <Text style={chartStyles.title}>Cumulative balance</Text>
+      <View style={{ height: 8 }} />
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 90 }}>
+        {totals.map((v, i) => (
+          <View key={`${labels[i]}-${i}`} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+            <View
+              style={{
+                width: '70%',
+                borderRadius: 3,
+                height: Math.max(4, ((v - min) / max) * 70),
+                backgroundColor: v < 0 ? theme.danger : theme.pine,
+              }}
+            />
+            <Text style={{ fontSize: 8.5, color: theme.muted, fontWeight: '600' }} numberOfLines={1}>{labels[i]}</Text>
+          </View>
+        ))}
+      </View>
+    </Card>
+  );
+}
+
 export function MonthlyChart({ monthly }: { monthly: { label: string; income: number; expense: number }[] }) {
   const max = Math.max(1, ...monthly.map((m) => Math.max(m.income, m.expense)));
   return (

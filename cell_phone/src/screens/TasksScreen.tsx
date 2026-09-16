@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
+import { QuickAdd, type QuickAddKind } from '../components/QuickAdd';
 import { useFocusEffect } from '@react-navigation/native';
 import { createTask, deleteTask, listTaskExpenseOptions, listTaskPlantingOptions, listTasks, updateTask } from '../db/repositories/tasks';
 import { listFarms } from '../db/repositories/farms';
@@ -31,6 +32,7 @@ export function TasksScreen() {
   const [categories, setCategories] = useState<NamedRow[]>([]);
   const [plantingOptions, setPlantingOptions] = useState<Array<{ id: number; type_name: string; farm_title: string }>>([]);
   const [expenseOptions, setExpenseOptions] = useState<Array<{ id: number; title: string; date: string; amount: number }>>([]);
+  const [quickAdd, setQuickAdd] = useState<QuickAddKind | null>(null);
 
   const refresh = useCallback(async () => {
     setRows(await listTasks({
@@ -84,13 +86,32 @@ export function TasksScreen() {
     setShowForm(true);
   };
 
+  const farmName = (id: number | null) => farms.find((f) => f.id === id)?.title ?? '';
+  const catName = (id: number | null) => categories.find((c) => c.id === id)?.name ?? '';
+  const plantingName = (id: number | null) => {
+    const p = plantingOptions.find((x) => x.id === id);
+    return p ? `${p.type_name} @ ${p.farm_title}` : '';
+  };
+
   return (
     <View style={{ flex: 1 }}>
       <Screen title={t('tasks')} subtitle="HISTORY OF WORK DONE ON A FARM">
+        {(farms.length === 0 || categories.length === 0) && (
+          <Card>
+            <Text style={{ color: theme.ink, fontWeight: '800', fontSize: 13 }}>
+              {farms.length === 0 && categories.length === 0
+                ? 'Add a farm and a task category first to log work.'
+                : farms.length === 0
+                  ? 'Add a farm first to log tasks.'
+                  : 'Add a task category first to log tasks.'}
+            </Text>
+          </Card>
+        )}
         <SearchBar value={q} onChange={setQ} placeholder="Search tasks…" />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-          <Chip label={farmId ? `Farm #${farmId}` : 'All farms'} active={!!farmId} onPress={() => setFarmId(null)} />
-          <Chip label={categoryId ? `Cat #${categoryId}` : 'All categories'} active={!!categoryId} onPress={() => setCategoryId(null)} />
+          <Chip label={farmId ? farmName(farmId) || `Farm #${farmId}` : 'All farms'} active={!!farmId} onPress={() => setFarmId(null)} />
+          <Chip label={categoryId ? catName(categoryId) || `Cat #${categoryId}` : 'All categories'} active={!!categoryId} onPress={() => setCategoryId(null)} />
+          <Chip label={plantingId ? plantingName(plantingId) || `Planting #${plantingId}` : 'All plantings'} active={!!plantingId} onPress={() => setPlantingId(null)} />
           <Chip label="Apply filters" onPress={refresh} tone={theme.sage} />
         </View>
         <Card>
@@ -107,6 +128,13 @@ export function TasksScreen() {
             value={categoryId}
             options={categories.map((c) => ({ id: c.id, label: c.name }))}
             onChange={setCategoryId}
+          />
+          <Select
+            label="Tree group filter"
+            placeholder="All plantings"
+            value={plantingId}
+            options={plantingOptions.map((p) => ({ id: p.id, label: `${p.type_name} @ ${p.farm_title}` }))}
+            onChange={setPlantingId}
           />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
@@ -145,6 +173,9 @@ export function TasksScreen() {
               onChange={setFarmId}
               allowClear={false}
             />
+            <Pressable onPress={() => setQuickAdd({ type: 'farm' })} style={{ marginTop: -4, marginBottom: 10 }}>
+              <Text style={{ color: theme.pine, fontWeight: '800', fontSize: 13 }}>+ New farm</Text>
+            </Pressable>
             <Select
               label="Category"
               placeholder="Select category…"
@@ -152,6 +183,19 @@ export function TasksScreen() {
               options={categories.map((c) => ({ id: c.id, label: c.name }))}
               onChange={setCategoryId}
               allowClear={false}
+            />
+            <Pressable onPress={() => setQuickAdd({ type: 'lookup', table: 'task_categories', label: 'task category' })} style={{ marginTop: -4, marginBottom: 10 }}>
+              <Text style={{ color: theme.pine, fontWeight: '800', fontSize: 13 }}>+ New category</Text>
+            </Pressable>
+            <QuickAdd
+              visible={quickAdd != null}
+              kind={quickAdd}
+              onClose={() => setQuickAdd(null)}
+              onCreated={(id) => {
+                if (quickAdd?.type === 'farm') setFarmId(id);
+                else setCategoryId(id);
+                refresh();
+              }}
             />
             <AppInput label="Title" placeholder="e.g. Pruning" value={title} onChangeText={setTitle} icon="create-outline" />
             <AppInput label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />

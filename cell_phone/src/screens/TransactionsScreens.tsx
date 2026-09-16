@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, Switch, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { QuickAdd, type QuickAddKind } from '../components/QuickAdd';
 import {
   createExpense, createIncome, deleteExpense, deleteIncome, listExpenses, listIncomes,
   listIncomeAllocations, setExpenseArchived, setIncomeArchived, updateExpense, updateIncome,
@@ -27,6 +28,8 @@ function useTxn(kind: 'expenses' | 'incomes') {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState('');
   const [farmId, setFarmId] = useState<number | null>(null);
+  const [filterCategoryId, setFilterCategoryId] = useState<number | null>(null);
+  const [filterContactId, setFilterContactId] = useState<number | null>(null);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [doc, setDoc] = useState<'invoice' | 'receipt' | ''>('');
@@ -49,6 +52,8 @@ function useTxn(kind: 'expenses' | 'incomes') {
     const f: any = {
       q,
       farm_id: farmId ?? undefined,
+      category_id: filterCategoryId ?? undefined,
+      contact_id: filterContactId ?? undefined,
       start: start || undefined,
       end: end || undefined,
       document_type: doc || undefined,
@@ -64,24 +69,54 @@ function useTxn(kind: 'expenses' | 'incomes') {
     } catch {
       // Option lists are best-effort.
     }
-  }, [q, farmId, start, end, doc, tax, showArchived, kind]);
+  }, [q, farmId, filterCategoryId, filterContactId, start, end, doc, tax, showArchived, kind]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
   return {
-    rows, q, setQ, farmId, setFarmId, start, setStart, end, setEnd, doc, setDoc, tax, setTax,
+    rows, q, setQ, farmId, setFarmId, filterCategoryId, setFilterCategoryId, filterContactId, setFilterContactId,
+    start, setStart, end, setEnd, doc, setDoc, tax, setTax,
     showArchived, setShowArchived, title, setTitle, amount, setAmount, categoryId, setCategoryId,
     contactId, setContactId, date, setDate, description, setDescription, includeTax, setIncludeTax,
     isArchived, setIsArchived, editingId, setEditingId, farms, categories, contacts, refresh,
   };
 }
 
-function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
+function QuickLink({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={{ marginTop: -4, marginBottom: 10 }}>
+      <Text style={{ color: theme.pine, fontWeight: '800', fontSize: 13 }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function FilterCard({ s, kind }: { s: ReturnType<typeof useTxn>; kind?: 'expenses' | 'incomes' }) {
+  const needsFarm = kind === 'expenses' && s.farms.length === 0;
+  const needsCategory = s.categories.length === 0;
   return (
     <Card>
+      {(needsFarm || needsCategory) && (
+        <View style={{ backgroundColor: '#FFF8E6', borderRadius: 12, padding: 10, marginBottom: 10 }}>
+          <Text style={{ color: theme.ink, fontWeight: '800', fontSize: 13 }}>
+            {needsFarm && needsCategory
+              ? 'Add a farm and a category first to record transactions.'
+              : needsFarm
+                ? 'Add a farm first to record expenses.'
+                : 'Add a category first to record transactions.'}
+          </Text>
+        </View>
+      )}
       <SearchBar value={s.q} onChange={s.setQ} placeholder={t('search')} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-        <Chip label={s.doc === '' ? 'All docs' : s.doc} onPress={() => s.setDoc(s.doc === '' ? 'invoice' : s.doc === 'invoice' ? 'receipt' : '')} tone={theme.sage} />
-        <Chip label={`Tax: ${s.tax}`} onPress={() => s.setTax(s.tax === 'all' ? 'taxed' : s.tax === 'taxed' ? 'untaxed' : 'all')} tone={theme.sage} />
+        <Chip
+          label={s.doc === '' ? t('all') : s.doc === 'invoice' ? t('invoice') : t('receipt')}
+          onPress={() => s.setDoc(s.doc === '' ? 'invoice' : s.doc === 'invoice' ? 'receipt' : '')}
+          tone={theme.sage}
+        />
+        <Chip
+          label={s.tax === 'all' ? t('all') : s.tax === 'taxed' ? t('taxed_only') : t('untaxed_only')}
+          onPress={() => s.setTax(s.tax === 'all' ? 'taxed' : s.tax === 'taxed' ? 'untaxed' : 'all')}
+          tone={theme.sage}
+        />
         <Chip
           label={s.showArchived === 'all' ? (isGreek() ? 'Όλα' : 'All') : s.showArchived === 'active' ? 'Active' : t('archived')}
           onPress={() => s.setShowArchived(s.showArchived === 'all' ? 'active' : s.showArchived === 'active' ? 'archived' : 'all')}
@@ -89,17 +124,37 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
         />
       </View>
       <Select
-        label="Farm filter"
-        placeholder="All farms"
+        label={t('farm')}
+        placeholder={t('all_farms')}
         value={s.farmId}
         options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
         onChange={s.setFarmId}
       />
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={s.start} onChangeText={s.setStart} /></View>
-        <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={s.end} onChangeText={s.setEnd} /></View>
+        <View style={{ flex: 1 }}>
+          <Select
+            label={t('category')}
+            placeholder={t('all_categories')}
+            value={s.filterCategoryId}
+            options={s.categories.map((x) => ({ id: x.id, label: x.name }))}
+            onChange={s.setFilterCategoryId}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Select
+            label={kind === 'expenses' ? t('vendor') : t('customer')}
+            placeholder={t('all_contacts')}
+            value={s.filterContactId}
+            options={s.contacts.map((x: any) => ({ id: x.id, label: x.name }))}
+            onChange={s.setFilterContactId}
+          />
+        </View>
       </View>
-      <AppButton title="Apply" variant="secondary" icon="filter" onPress={s.refresh} />
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1 }}><AppInput placeholder={t('from')} value={s.start} onChangeText={s.setStart} /></View>
+        <View style={{ flex: 1 }}><AppInput placeholder={t('to')} value={s.end} onChangeText={s.setEnd} /></View>
+      </View>
+      <AppButton title={t('apply')} variant="secondary" icon="filter" onPress={s.refresh} />
     </Card>
   );
 }
@@ -108,6 +163,9 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
   s: ReturnType<typeof useTxn>; kind: 'expenses' | 'incomes';
   allocations: AllocationDraft[]; setAllocations: (v: AllocationDraft[]) => void;
 }) {
+  const [quickAdd, setQuickAdd] = useState<QuickAddKind | null>(null);
+  const lookupTable = kind === 'expenses' ? 'expense_categories' as const : 'income_categories' as const;
+  const contactKind = kind === 'expenses' ? 'vendors' as const : 'customers' as const;
   return (
     <View>
       <AppInput label="Title" value={s.title} onChangeText={s.setTitle} icon="create-outline" />
@@ -116,14 +174,17 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
         <View style={{ flex: 1 }}><AppInput label="Date" value={s.date} onChangeText={s.setDate} icon="calendar-outline" /></View>
       </View>
       {kind === 'expenses' && (
-        <Select
-          label="Farm"
-          placeholder="Select farm…"
-          value={s.farmId}
-          options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
-          onChange={s.setFarmId}
-          allowClear={false}
-        />
+        <View>
+          <Select
+            label="Farm"
+            placeholder="Select farm…"
+            value={s.farmId}
+            options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
+            onChange={s.setFarmId}
+            allowClear={false}
+          />
+          <QuickLink label="+ New farm" onPress={() => setQuickAdd({ type: 'farm' })} />
+        </View>
       )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}>
@@ -135,6 +196,7 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
             onChange={s.setCategoryId}
             allowClear={false}
           />
+          <QuickLink label="+ New category" onPress={() => setQuickAdd({ type: 'lookup', table: lookupTable, label: 'category' })} />
         </View>
         <View style={{ flex: 1 }}>
           <Select
@@ -144,8 +206,23 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
             options={s.contacts.map((x: any) => ({ id: x.id, label: x.name }))}
             onChange={s.setContactId}
           />
+          <QuickLink
+            label={kind === 'expenses' ? '+ New vendor' : '+ New customer'}
+            onPress={() => setQuickAdd({ type: 'contact', kind: contactKind, label: kind === 'expenses' ? 'vendor' : 'customer' })}
+          />
         </View>
       </View>
+      <QuickAdd
+        visible={quickAdd != null}
+        kind={quickAdd}
+        onClose={() => setQuickAdd(null)}
+        onCreated={(id) => {
+          if (quickAdd?.type === 'farm') s.setFarmId(id);
+          else if (quickAdd?.type === 'lookup') s.setCategoryId(id);
+          else s.setContactId(id);
+          s.refresh();
+        }}
+      />
       <AppInput label="Description" placeholder="Optional" value={s.description} onChangeText={s.setDescription} />
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <Chip label={s.doc === '' || s.doc === 'receipt' ? '🧾 Receipt' : '🧾 Invoice'} onPress={() => s.setDoc(s.doc === 'invoice' ? 'receipt' : 'invoice')} tone={theme.sage} />
@@ -242,7 +319,7 @@ export function ExpensesScreen() {
   return (
     <View style={{ flex: 1 }}>
       <Screen title={t('expenses')} subtitle="EVERY INVESTMENT IN YOUR FARM">
-        <FilterCard s={s} />
+        <FilterCard s={s} kind="expenses" />
         <SectionTitle title={`Total ${fmt(total)}`} action={<AppButton title="Export" variant="ghost" onPress={() => exportAndShare('expenses', s.rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />} />
         {s.rows.length === 0 && <EmptyState icon="trending-down-outline" title="No expenses" hint="Record seeds, fuel, labor and more." />}
         {s.rows.map((r) => (
@@ -313,7 +390,7 @@ export function IncomesScreen() {
   return (
     <View style={{ flex: 1 }}>
       <Screen title={t('incomes')} subtitle="WHAT YOUR HARD WORK BRINGS IN">
-        <FilterCard s={s} />
+        <FilterCard s={s} kind="incomes" />
         <SectionTitle title={`Total ${fmt(total)}`} action={<AppButton title="Export" variant="ghost" onPress={() => exportAndShare('incomes', s.rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />} />
         {s.rows.length === 0 && <EmptyState icon="trending-up-outline" title="No income yet" hint="Record your first sale." />}
         {s.rows.map((r) => (

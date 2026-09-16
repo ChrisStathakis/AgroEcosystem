@@ -57,7 +57,7 @@ export function OverviewScreen({ navigation }: any) {
               <AppButton title="View analytics" icon="bar-chart-outline" variant="ghost" onPress={() => navigation.navigate('Analytics')} />
             </View>
 
-            <SectionTitle title="Latest activity" />
+            <SectionTitle title={t('latest_activity')} />
             {recent.length === 0 && <EmptyState icon="receipt-outline" title="No transactions yet" hint="Start with a farm and a category." />}
             {recent.map((r) => {
               const isOut = r.kind === 'expenses';
@@ -79,7 +79,7 @@ export function OverviewScreen({ navigation }: any) {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14.5, fontWeight: '700', color: theme.ink }}>{r.title}</Text>
                       <Text style={{ fontSize: 12.5, color: theme.muted }}>
-                        {r.farm_title} · {r.date}
+                        {(isOut ? r.farm_title : (r.farm_summary || t('unallocated')))} · {r.date}
                       </Text>
                     </View>
                     <Text style={{ fontSize: 14.5, fontWeight: '800', color: isOut ? theme.danger : theme.success }}>
