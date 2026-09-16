@@ -4,6 +4,13 @@
     "slug": "agro-cell-phone",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#244b3b"
+    },
+    "scheme": "agro",
     "primaryColor": "#244b3b",
     "ios": {
       "supportsTablet": true

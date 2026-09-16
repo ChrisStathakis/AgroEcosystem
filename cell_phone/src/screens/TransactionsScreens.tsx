@@ -11,16 +11,22 @@ import { listLookups } from '../db/repositories/lookups';
 import { listCustomers, listVendors } from '../db/repositories/contacts';
 import { exportAndShare } from '../lib/csv';
 import { Screen } from './Screen';
-import { todayISODate } from '../db/types';
+import { todayISODate, type Customer, type Farm, type NamedRow, type Vendor } from '../db/types';
 import { fmt, theme } from '../components/theme';
 import { isGreek, t } from '../lib/i18n';
 import { AppButton, AppInput, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
+import { Select } from '../components/Select';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
+
+export interface AllocationDraft {
+  farm_id: number | null;
+  amount: string;
+}
 
 function useTxn(kind: 'expenses' | 'incomes') {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState('');
-  const [farmId, setFarmId] = useState('');
+  const [farmId, setFarmId] = useState<number | null>(null);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [doc, setDoc] = useState<'invoice' | 'receipt' | ''>('');
@@ -28,19 +34,21 @@ function useTxn(kind: 'expenses' | 'incomes') {
   const [showArchived, setShowArchived] = useState<'all' | 'active' | 'archived'>('all');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [contactId, setContactId] = useState('');
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [contactId, setContactId] = useState<number | null>(null);
   const [date, setDate] = useState(todayISODate());
   const [description, setDescription] = useState('');
   const [includeTax, setIncludeTax] = useState(kind === 'incomes');
   const [isArchived, setIsArchived] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [hint, setHint] = useState('');
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [categories, setCategories] = useState<NamedRow[]>([]);
+  const [contacts, setContacts] = useState<Array<Vendor | Customer>>([]);
 
   const refresh = useCallback(async () => {
     const f: any = {
       q,
-      farm_id: farmId ? Number(farmId) : undefined,
+      farm_id: farmId ?? undefined,
       start: start || undefined,
       end: end || undefined,
       document_type: doc || undefined,
@@ -50,14 +58,11 @@ function useTxn(kind: 'expenses' | 'incomes') {
     if (showArchived === 'archived') f.is_archived = true;
     setRows(kind === 'expenses' ? await listExpenses(f) : await listIncomes(f));
     try {
-      const farms = await listFarms();
-      const cats = await listLookups(kind === 'expenses' ? 'expense_categories' : 'income_categories');
-      const contacts = kind === 'expenses' ? await listVendors() : await listCustomers();
-      setHint(
-        `farms: ${farms.map((x) => `${x.id}=${x.title}`).join(', ') || 'none'} | categories: ${cats.map((x) => `${x.id}=${x.name}`).join(', ') || 'none'} | contacts: ${contacts.map((x: any) => `${x.id}=${x.name}`).join(', ') || 'none'}`,
-      );
+      setFarms(await listFarms());
+      setCategories(await listLookups(kind === 'expenses' ? 'expense_categories' : 'income_categories'));
+      setContacts(kind === 'expenses' ? await listVendors() : await listCustomers());
     } catch {
-      setHint('');
+      // Option lists are best-effort.
     }
   }, [q, farmId, start, end, doc, tax, showArchived, kind]);
 
@@ -66,7 +71,7 @@ function useTxn(kind: 'expenses' | 'incomes') {
     rows, q, setQ, farmId, setFarmId, start, setStart, end, setEnd, doc, setDoc, tax, setTax,
     showArchived, setShowArchived, title, setTitle, amount, setAmount, categoryId, setCategoryId,
     contactId, setContactId, date, setDate, description, setDescription, includeTax, setIncludeTax,
-    isArchived, setIsArchived, editingId, setEditingId, hint, refresh,
+    isArchived, setIsArchived, editingId, setEditingId, farms, categories, contacts, refresh,
   };
 }
 
@@ -83,8 +88,14 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
           tone={theme.sage}
         />
       </View>
+      <Select
+        label="Farm filter"
+        placeholder="All farms"
+        value={s.farmId}
+        options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
+        onChange={s.setFarmId}
+      />
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput placeholder="Farm id" value={s.farmId} onChangeText={s.setFarmId} keyboardType="number-pad" /></View>
         <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={s.start} onChangeText={s.setStart} /></View>
         <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={s.end} onChangeText={s.setEnd} /></View>
       </View>
@@ -95,20 +106,45 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
 
 function TxnForm({ s, kind, allocations, setAllocations }: {
   s: ReturnType<typeof useTxn>; kind: 'expenses' | 'incomes';
-  allocations: Array<{ farm_id: string; amount: string }>; setAllocations: (v: Array<{ farm_id: string; amount: string }>) => void;
+  allocations: AllocationDraft[]; setAllocations: (v: AllocationDraft[]) => void;
 }) {
   return (
     <View>
-      <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>{s.hint}</Text>
       <AppInput label="Title" value={s.title} onChangeText={s.setTitle} icon="create-outline" />
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}><AppInput label="Amount" value={s.amount} onChangeText={s.setAmount} keyboardType="decimal-pad" icon="cash-outline" /></View>
         <View style={{ flex: 1 }}><AppInput label="Date" value={s.date} onChangeText={s.setDate} icon="calendar-outline" /></View>
       </View>
-      {kind === 'expenses' && <AppInput label="Farm id" value={s.farmId} onChangeText={s.setFarmId} keyboardType="number-pad" />}
+      {kind === 'expenses' && (
+        <Select
+          label="Farm"
+          placeholder="Select farm…"
+          value={s.farmId}
+          options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
+          onChange={s.setFarmId}
+          allowClear={false}
+        />
+      )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput label="Category id" value={s.categoryId} onChangeText={s.setCategoryId} keyboardType="number-pad" /></View>
-        <View style={{ flex: 1 }}><AppInput label={kind === 'expenses' ? 'Vendor id' : 'Customer id'} value={s.contactId} onChangeText={s.setContactId} keyboardType="number-pad" /></View>
+        <View style={{ flex: 1 }}>
+          <Select
+            label="Category"
+            placeholder="Select…"
+            value={s.categoryId}
+            options={s.categories.map((x) => ({ id: x.id, label: x.name }))}
+            onChange={s.setCategoryId}
+            allowClear={false}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Select
+            label={kind === 'expenses' ? 'Vendor (optional)' : 'Customer (optional)'}
+            placeholder="None"
+            value={s.contactId}
+            options={s.contacts.map((x: any) => ({ id: x.id, label: x.name }))}
+            onChange={s.setContactId}
+          />
+        </View>
       </View>
       <AppInput label="Description" placeholder="Optional" value={s.description} onChangeText={s.setDescription} />
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -120,11 +156,18 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
         <View>
           <Text style={{ fontWeight: '800', marginTop: 8, color: theme.ink }}>Farm allocations (optional)</Text>
           {allocations.map((allocation, index) => <View key={index} style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginVertical: 6, backgroundColor: '#FAFAF6' }}>
-            <AppInput placeholder="Farm id" value={allocation.farm_id} onChangeText={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, farm_id: value } : row))} keyboardType="number-pad" />
+            <Select
+              label="Farm"
+              placeholder="Select farm…"
+              value={allocation.farm_id}
+              options={s.farms.map((x) => ({ id: x.id, label: x.title }))}
+              onChange={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, farm_id: value } : row))}
+              allowClear={false}
+            />
             <AppInput placeholder="Allocated amount" value={allocation.amount} onChangeText={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, amount: value } : row))} keyboardType="decimal-pad" />
             <AppButton title="Remove" variant="ghost" onPress={() => setAllocations(allocations.filter((_, i) => i !== index))} />
           </View>)}
-          <AppButton title="Add allocation" variant="secondary" icon="add" onPress={() => setAllocations([...allocations, { farm_id: '', amount: '' }])} />
+          <AppButton title="Add allocation" variant="secondary" icon="add" onPress={() => setAllocations([...allocations, { farm_id: null, amount: '' }])} />
         </View>
       )}
     </View>
@@ -164,14 +207,16 @@ export function ExpensesScreen() {
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
 
   const resetForm = () => {
-    s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
-    s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(false); s.setIsArchived(false); s.setEditingId(null);
+    s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId(null);
+    s.setCategoryId(null); s.setDate(todayISODate()); s.setIncludeTax(false); s.setIsArchived(false); s.setEditingId(null);
   };
 
   const submit = async () => {
     try {
+      if (!s.farmId) throw new Error('Select a farm.');
+      if (!s.categoryId) throw new Error('Select a category.');
       const payload = {
-        farm_id: Number(s.farmId), category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
+        farm_id: s.farmId, category_id: s.categoryId, contact_id: s.contactId,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,
         document_type: (s.doc || 'receipt') as 'invoice' | 'receipt',
         include_in_tax: s.includeTax, is_archived: s.isArchived,
@@ -188,8 +233,8 @@ export function ExpensesScreen() {
   const startEdit = (r: any) => {
     s.setEditingId(r.id);
     s.setTitle(r.title); s.setAmount(String(r.amount)); s.setDate(r.date);
-    s.setFarmId(String(r.farm_id)); s.setCategoryId(String(r.category_id));
-    s.setContactId(r.vendor_id ? String(r.vendor_id) : '');
+    s.setFarmId(r.farm_id); s.setCategoryId(r.category_id);
+    s.setContactId(r.vendor_id ?? null);
     s.setDescription(r.description ?? ''); s.setDoc(r.document_type);
     s.setIncludeTax(!!r.include_in_tax); s.setIsArchived(!!r.is_archived);
   };
@@ -223,19 +268,20 @@ export function ExpensesScreen() {
 
 export function IncomesScreen() {
   const s = useTxn('incomes');
-  const [allocations, setAllocations] = useState<Array<{ farm_id: string; amount: string }>>([]);
+  const [allocations, setAllocations] = useState<AllocationDraft[]>([]);
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
 
   const resetForm = () => {
-    s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
-    s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(true); s.setIsArchived(false); s.setEditingId(null);
+    s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId(null);
+    s.setCategoryId(null); s.setDate(todayISODate()); s.setIncludeTax(true); s.setIsArchived(false); s.setEditingId(null);
     setAllocations([]);
   };
 
   const submit = async () => {
     try {
+      if (!s.categoryId) throw new Error('Select a category.');
       const payload = {
-        category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
+        category_id: s.categoryId, contact_id: s.contactId,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,
         document_type: (s.doc || 'receipt') as 'invoice' | 'receipt',
         include_in_tax: s.includeTax, is_archived: s.isArchived,
@@ -253,12 +299,12 @@ export function IncomesScreen() {
   const startEdit = async (r: any) => {
     s.setEditingId(r.id);
     s.setTitle(r.title); s.setAmount(String(r.amount)); s.setDate(r.date);
-    s.setCategoryId(String(r.category_id)); s.setContactId(r.customer_id ? String(r.customer_id) : '');
+    s.setCategoryId(r.category_id); s.setContactId(r.customer_id ?? null);
     s.setDescription(r.description ?? ''); s.setDoc(r.document_type);
     s.setIncludeTax(!!r.include_in_tax); s.setIsArchived(!!r.is_archived);
     try {
       const rows = await listIncomeAllocations(r.id);
-      setAllocations(rows.map((a) => ({ farm_id: String(a.farm_id), amount: String(a.amount) })));
+      setAllocations(rows.map((a) => ({ farm_id: a.farm_id, amount: String(a.amount) })));
     } catch {
       setAllocations([]);
     }

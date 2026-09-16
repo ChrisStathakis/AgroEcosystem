@@ -5,13 +5,15 @@ import {
   availableYears, cashFlowReport, categoryBreakdown, describeFilters, farmProfit, financialSummary,
   profitLossReport, taxReport,
 } from '../db/repositories/analytics';
-import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary } from '../db/types';
+import type { AnalyticsFilters, CashFlowRow, CategoryTotal, Farm, FarmProfitRow, FinancialSummary } from '../db/types';
 import { MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { fmt, theme } from '../components/theme';
 import { cashFlowToCSV, exportReportAndShare, overviewToCSV, profitLossToCSV, taxToCSV } from '../lib/csv';
 import { localizeCategoryName, localizeFarmName, localizeMonthLabel, t } from '../lib/i18n';
 import { AppButton, AppInput, Badge, Card, EmptyState, RowCard, SegmentedTabs, SectionTitle, Skeleton } from '../components/ui';
+import { Select } from '../components/Select';
+import { listFarms } from '../db/repositories/farms';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 type Tab = 'overview' | 'pl' | 'cf' | 'tax';
@@ -26,7 +28,8 @@ export function AnalyticsScreen() {
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
-  const [farmId, setFarmId] = useState('');
+  const [farmId, setFarmId] = useState<number | null>(null);
+  const [farmOptions, setFarmOptions] = useState<Farm[]>([]);
   const [years, setYears] = useState<number[]>([]);
   const [desc, setDesc] = useState('');
 
@@ -38,7 +41,7 @@ export function AnalyticsScreen() {
     } else if (year.trim()) {
       f.year = Number(year);
     }
-    if (farmId) f.farm_id = Number(farmId);
+    if (farmId) f.farm_id = farmId;
     return f;
   }, [year, start, end, farmId]);
 
@@ -52,6 +55,11 @@ export function AnalyticsScreen() {
     setCf(cfReport);
     setTax(await taxReport(f));
     setYears(await availableYears());
+    try {
+      setFarmOptions(await listFarms());
+    } catch {
+      // best-effort
+    }
     setDesc(describeFilters(f, s.period_label));
   }, [filters]);
 
@@ -91,8 +99,14 @@ export function AnalyticsScreen() {
         <Card>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}><AppInput label="Year" value={year} onChangeText={setYear} keyboardType="number-pad" /></View>
-            <View style={{ flex: 1 }}><AppInput label="Farm id" placeholder="Optional" value={farmId} onChangeText={setFarmId} keyboardType="number-pad" /></View>
           </View>
+          <Select
+            label="Farm"
+            placeholder="All farms"
+            value={farmId}
+            options={farmOptions.map((x) => ({ id: x.id, label: x.title }))}
+            onChange={setFarmId}
+          />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
             <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>

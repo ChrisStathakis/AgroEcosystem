@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { File, Paths } from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { getDb } from '../db/client';
 import { SINGLE_PROFILE_ID } from '../db/types';
@@ -11,12 +12,15 @@ import { getLang, setLang, t } from '../lib/i18n';
 import { AppButton, AppInput, Badge, Card, SectionTitle } from '../components/ui';
 import { theme } from '../components/theme';
 
+const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
+
 export function SettingsScreen() {
   const [name, setName] = useState('');
   const [lang, setLangState] = useState(getLang());
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [preview, setPreview] = useState<Record<string, number> | null>(null);
   const [pending, setPending] = useState<any | null>(null);
+  const [pendingName, setPendingName] = useState<string | null>(null);
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
   const [confirmName, setConfirmName] = useState('');
 
@@ -39,12 +43,41 @@ export function SettingsScreen() {
   const importDemoBackup = async () => {
     const payload = await buildBackup();
     setPending(payload);
+    setPendingName('current workspace data');
     setPreview(describePayload(payload));
+  };
+
+  const pickBackupFile = async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/json', 'text/plain'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      if (asset.size != null && asset.size > MAX_BACKUP_BYTES) {
+        Alert.alert('File too large', 'Backup files must be 5MB or smaller (same limit as the website).');
+        return;
+      }
+      const file = new File(asset.uri);
+      const text = await file.text();
+      if (text.length > MAX_BACKUP_BYTES) {
+        Alert.alert('File too large', 'Backup files must be 5MB or smaller (same limit as the website).');
+        return;
+      }
+      const payload = JSON.parse(text);
+      setPending(payload);
+      setPendingName(asset.name ?? 'backup file');
+      setPreview(describePayload(payload));
+    } catch (e: any) {
+      Alert.alert('Cannot read backup', e?.message ?? String(e));
+    }
   };
 
   const confirmRestore = async () => {
     if (!pending) {
-      Alert.alert('No backup', 'Build or load a backup first.');
+      Alert.alert('No backup', 'Pick a backup file or preview current data first.');
       return;
     }
     try {
@@ -52,6 +85,7 @@ export function SettingsScreen() {
       const total = Object.values(result).reduce((a, b) => a + b, 0);
       Alert.alert('Restore complete', `${total} records imported (${mode}).`);
       setPending(null);
+      setPendingName(null);
       setPreview(null);
       refresh();
     } catch (e: any) {
@@ -104,6 +138,7 @@ export function SettingsScreen() {
             <AppButton title="Ελληνικά" variant={lang === 'el' ? 'primary' : 'secondary'} onPress={() => { setLang('el'); setLangState('el'); }} />
           </View>
         </View>
+        <Text style={{ color: theme.muted, fontSize: 12, marginTop: 8 }}>Your choice is saved on this device and restored on restart.</Text>
       </Card>
 
       <Card style={{ marginTop: 12 }}>
@@ -111,8 +146,10 @@ export function SettingsScreen() {
         <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Current rows: {counts ? JSON.stringify(counts) : '…'}</Text>
         <AppButton title="Download backup (JSON)" icon="cloud-download-outline" variant="secondary" onPress={downloadBackup} />
         <View style={{ height: 8 }} />
+        <AppButton title="Pick backup file (.json)" icon="folder-open-outline" variant="secondary" onPress={pickBackupFile} />
+        <View style={{ height: 8 }} />
         <AppButton title="Preview current data" icon="eye-outline" variant="secondary" onPress={importDemoBackup} />
-        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Preview: {JSON.stringify(preview)}</Text> : null}
+        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Preview{pendingName ? ` (${pendingName})` : ''}: {JSON.stringify(preview)}</Text> : null}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
           <View style={{ flex: 1 }}>
             <AppButton title={`Mode: ${mode}`} variant="secondary" onPress={() => setMode(mode === 'replace' ? 'merge' : 'replace')} />

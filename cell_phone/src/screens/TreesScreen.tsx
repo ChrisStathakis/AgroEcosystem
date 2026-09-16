@@ -4,32 +4,35 @@ import { useFocusEffect } from '@react-navigation/native';
 import { listPlantings, listTreeMovements, recordTreeMovement } from '../db/repositories/trees';
 import { listFarms } from '../db/repositories/farms';
 import { listLookups } from '../db/repositories/lookups';
-import type { TreeInventoryMovement, TreePlanting } from '../db/types';
+import type { Farm, NamedRow, TreeInventoryMovement, TreePlanting } from '../db/types';
 import { todayISODate } from '../db/types';
 import { Screen } from './Screen';
 import { t } from '../lib/i18n';
 import { AppButton, AppInput, Badge, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
+import { Select } from '../components/Select';
 import { theme } from '../components/theme';
 
 export function TreesScreen() {
   const [rows, setRows] = useState<TreePlanting[]>([]);
   const [history, setHistory] = useState<TreeInventoryMovement[]>([]);
   const [q, setQ] = useState('');
-  const [farmId, setFarmId] = useState('');
-  const [plantingId, setPlantingId] = useState('');
-  const [typeId, setTypeId] = useState('');
+  const [farmId, setFarmId] = useState<number | null>(null);
+  const [plantingId, setPlantingId] = useState<number | null>(null);
+  const [typeId, setTypeId] = useState<number | null>(null);
   const [count, setCount] = useState('');
   const [action, setAction] = useState<'add' | 'remove'>('add');
   const [date, setDate] = useState(todayISODate());
   const [notes, setNotes] = useState('');
-  const [hint, setHint] = useState('');
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [types, setTypes] = useState<NamedRow[]>([]);
+  const [allPlantings, setAllPlantings] = useState<TreePlanting[]>([]);
 
   const refresh = useCallback(async () => {
-    setRows(await listPlantings(farmId ? Number(farmId) : undefined, q));
-    setHistory(await listTreeMovements(plantingId ? Number(plantingId) : undefined));
-    const farms = await listFarms();
-    const types = await listLookups('tree_types');
-    setHint(`farms: ${farms.map((f) => `${f.id}=${f.title}`).join(', ') || 'none — add a farm first'} | types: ${types.map((x) => `${x.id}=${x.name}`).join(', ') || 'none — add a tree type first'}`);
+    setRows(await listPlantings(farmId ?? undefined, q));
+    setHistory(await listTreeMovements(plantingId ?? undefined));
+    setFarms(await listFarms());
+    setTypes(await listLookups('tree_types'));
+    setAllPlantings(await listPlantings());
   }, [q, farmId, plantingId]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
@@ -37,10 +40,20 @@ export function TreesScreen() {
   return (
     <Screen title={t('trees')} subtitle="HOW MANY TREES OF EACH TYPE EACH FARM HAS">
       <SearchBar value={q} onChange={setQ} placeholder="Search plantings…" />
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput placeholder="Farm id filter" value={farmId} onChangeText={setFarmId} keyboardType="number-pad" /></View>
-        <View style={{ flex: 1 }}><AppInput placeholder="Planting id" value={plantingId} onChangeText={setPlantingId} keyboardType="number-pad" /></View>
-      </View>
+      <Select
+        label="Farm filter"
+        placeholder="All farms"
+        value={farmId}
+        options={farms.map((f) => ({ id: f.id, label: f.title, sub: `${f.size} ha` }))}
+        onChange={setFarmId}
+      />
+      <Select
+        label="Planting filter (history)"
+        placeholder="All plantings"
+        value={plantingId}
+        options={allPlantings.map((p) => ({ id: p.id, label: `${p.farm_title} — ${p.tree_type_name}`, sub: `${p.count} trees` }))}
+        onChange={setPlantingId}
+      />
       <AppButton title="Apply filters" variant="secondary" icon="filter" onPress={refresh} />
 
       <SectionTitle title="Plantings" action={<Badge label={`${rows.length}`} tone="green" />} />
@@ -57,7 +70,6 @@ export function TreesScreen() {
 
       <Card style={{ marginTop: 14 }}>
         <Text style={{ fontSize: 16, fontWeight: '800', color: theme.ink, marginBottom: 6 }}>Record tree movement</Text>
-        <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>{hint}</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <View style={{ flex: 1 }}>
             <AppButton title="＋ Add" variant={action === 'add' ? 'primary' : 'secondary'} onPress={() => setAction('add')} />
@@ -67,8 +79,22 @@ export function TreesScreen() {
           </View>
         </View>
         <View style={{ height: 8 }} />
-        <AppInput label="Farm id" value={farmId} onChangeText={setFarmId} keyboardType="number-pad" icon="leaf-outline" />
-        <AppInput label="Tree type id" value={typeId} onChangeText={setTypeId} keyboardType="number-pad" icon="git-branch-outline" />
+        <Select
+          label="Farm"
+          placeholder={farms.length === 0 ? 'No farms — add one first' : 'Select farm…'}
+          value={farmId}
+          options={farms.map((f) => ({ id: f.id, label: f.title, sub: `${f.size} ha` }))}
+          onChange={setFarmId}
+          allowClear={false}
+        />
+        <Select
+          label="Tree type"
+          placeholder={types.length === 0 ? 'No tree types — add one first' : 'Select type…'}
+          value={typeId}
+          options={types.map((x) => ({ id: x.id, label: x.name }))}
+          onChange={setTypeId}
+          allowClear={false}
+        />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <View style={{ flex: 1 }}><AppInput label="Quantity" value={count} onChangeText={setCount} keyboardType="number-pad" /></View>
           <View style={{ flex: 1 }}><AppInput label="Date" value={date} onChangeText={setDate} /></View>
@@ -79,7 +105,8 @@ export function TreesScreen() {
           icon="checkmark-circle"
           onPress={async () => {
             try {
-              await recordTreeMovement({ farm_id: Number(farmId), tree_type_id: Number(typeId), action, quantity: Number(count), effective_date: date, notes });
+              if (!farmId || !typeId) throw new Error('Select a farm and a tree type.');
+              await recordTreeMovement({ farm_id: farmId, tree_type_id: typeId, action, quantity: Number(count), effective_date: date, notes });
               setCount('');
               setNotes('');
               refresh();

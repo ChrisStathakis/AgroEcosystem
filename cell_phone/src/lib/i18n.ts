@@ -3,6 +3,18 @@ export type Lang = 'en' | 'el';
 
 let current: Lang = 'en';
 const listeners = new Set<() => void>();
+let loaded = false;
+
+const LANG_FILE = 'agro-lang.json';
+
+function langFile() {
+  // Lazy-require expo-file-system so unit/smoke (node) environments don't crash.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('expo-file-system');
+  const dir = fs.Paths?.document ?? fs.Paths?.cache;
+  if (!dir) return null;
+  return new fs.File(dir, LANG_FILE);
+}
 
 export function getLang(): Lang {
   return current;
@@ -11,6 +23,37 @@ export function getLang(): Lang {
 export function setLang(l: Lang): void {
   current = l;
   for (const fn of listeners) fn();
+  // Fire-and-forget persistence; callers stay synchronous.
+  persistLang(l).catch(() => {});
+}
+
+async function persistLang(l: Lang): Promise<void> {
+  try {
+    const file = langFile();
+    if (!file) return;
+    file.write(JSON.stringify({ lang: l }));
+  } catch {
+    // Persistence is best-effort; in-memory value still applies.
+  }
+}
+
+export async function loadLang(): Promise<Lang> {
+  if (loaded) return current;
+  try {
+    const file = langFile();
+    if (file?.exists) {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as { lang?: Lang };
+      if (parsed.lang === 'en' || parsed.lang === 'el') {
+        current = parsed.lang;
+      }
+    }
+  } catch {
+    // Keep default 'en' on any read/parse error.
+  }
+  loaded = true;
+  for (const fn of listeners) fn();
+  return current;
 }
 
 export function subscribeLang(fn: () => void): () => void {
