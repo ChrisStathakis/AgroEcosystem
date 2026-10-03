@@ -13,6 +13,7 @@ urlpatterns = [
     path("analytics/profit-loss/", views.analytics_profit_loss, name="analytics-pl"),
     path("analytics/cash-flow/", views.analytics_cash_flow, name="analytics-cf"),
     path("analytics/tax/", views.analytics_tax, name="analytics-tax"),
+    path("analytics/obligations/", views.analytics_obligations, name="analytics-obligations"),
     path("analytics/export/<str:report>/", views.analytics_export, name="analytics-export"),
     path("profile/", views.profile_settings, name="profile-settings"),
     path("workspace/backup/", views.backup_download, name="workspace-backup"),

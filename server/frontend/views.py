@@ -23,6 +23,7 @@ from analytics.services import (
     describe_filters,
     farm_profit,
     financial_summary,
+    obligations_report,
     profit_loss_report,
     tax_report,
 )
@@ -231,7 +232,7 @@ def analytics(request):
             for row in farms["farms"]]}
     return render(request, el_template(request, "frontend/analytics.html"), context_for(
         request, "analytics", summary=summary, export_report="overview",
-        chart_data=json.dumps(payload, cls=DjangoJSONEncoder), farm_rows=farms["farms"],
+        chart_data=payload, farm_rows=farms["farms"],
         filter_form=filter_form, query_params=_analytics_query_params(request),
         filter_description=describe_filters(profile, filters or {}),
         print_mode=request.GET.get("print") == "1"))
@@ -303,7 +304,7 @@ def analytics_cash_flow(request):
                "running": [float(value) for value in report["cumulative"]]}
     return render(request, el_template(request, "frontend/analytics_cf.html"), context_for(
         request, "analytics-cf", report=report, export_report="cf", filter_form=filter_form,
-        chart_data=json.dumps(payload, cls=DjangoJSONEncoder),
+        chart_data=payload,
         query_params=_analytics_query_params(request),
         filter_description=describe_filters(profile, filters or {}),
         print_mode=request.GET.get("print") == "1"))
@@ -322,10 +323,22 @@ def analytics_tax(request):
 
 
 @login_required
+def analytics_obligations(request):
+    profile = workspace(request)
+    filter_form, filters = parse_analytics_filters(request, profile)
+    report = obligations_report(profile, filters=filters)
+    return render(request, el_template(request, "frontend/analytics_obligations.html"), context_for(
+        request, "analytics-obligations", report=report, export_report="obligations", filter_form=filter_form,
+        query_params=_analytics_query_params(request),
+        filter_description=describe_filters(profile, filters or {}),
+        print_mode=request.GET.get("print") == "1"))
+
+
+@login_required
 def analytics_export(request, report):
-    """CSV export for the overview and the three reports, honoring filters."""
+    """CSV export for the overview and the reports, honoring filters."""
     builders = {"overview": financial_summary, "pl": profit_loss_report,
-                "cf": cash_flow_report, "tax": tax_report}
+                "cf": cash_flow_report, "tax": tax_report, "obligations": obligations_report}
     if report not in builders:
         raise Http404
     profile = workspace(request)
@@ -335,7 +348,17 @@ def analytics_export(request, report):
     period = str(data.get("period_label", data.get("year", ""))).replace(" – ", "_").replace(" ", "")
     response["Content-Disposition"] = f'attachment; filename="analytics-{report}-{period or "all"}.csv"'
     writer = csv.writer(response)
-    if report == "tax":
+    if report == "obligations":
+        writer.writerow(["title", "date", "farm", "category", "vendor", "amount", "overdue"])
+        for item in data["items"]:
+            writer.writerow([item.title, item.date.isoformat(),
+                             str(item.farm) if item.farm_id else "All farms (split)",
+                             str(item.category), str(item.vendor) if item.vendor else "",
+                             f"{item.amount:.2f}", "yes" if item.is_overdue else "no"])
+        writer.writerow([])
+        writer.writerow(["unpaid total", "", "", "", "", f"{data['unpaid_total']:.2f}", ""])
+        writer.writerow(["overdue total", "", "", "", "", f"{data['overdue_total']:.2f}", ""])
+    elif report == "tax":
         writer.writerow(["kind", "title", "date", "category", "contact", "amount"])
         for item in data["incomes"]:
             writer.writerow(["income", item.title, item.date.isoformat(), str(item.category),
@@ -487,14 +510,32 @@ def filtered_transactions(request, resource, spec, profile):
     records = spec.model.objects.filter(profile=profile).select_related(*related)
     if resource == "incomes":
         records = records.prefetch_related("allocations__farm")
-    filters = forms.TransactionFilterForm(request.GET, profile=profile)
+    filters = forms.TransactionFilterForm(request.GET, profile=profile, resource=resource)
     if filters.is_valid():
         data = filters.cleaned_data
         if data["q"]:
             records = records.filter(Q(title__icontains=data["q"]) | Q(description__icontains=data["q"]))
         if data["farm"]:
-            records = (records.filter(farm=data["farm"]) if resource == "expenses"
-                       else records.filter(allocations__farm=data["farm"]).distinct())
+            if resource == "expenses":
+                records = records.filter(Q(farm=data["farm"]) | Q(farm__isnull=True))
+            else:
+                records = records.filter(allocations__farm=data["farm"]).distinct()
+        if data["category"]:
+            records = records.filter(category=data["category"])
+        if data["contact"]:
+            contact_attr = "vendor" if resource == "expenses" else "customer"
+            records = records.filter(**{contact_attr: data["contact"]})
+        if data["document_type"]:
+            records = records.filter(document_type=data["document_type"])
+        if data["tax"] == "taxed":
+            records = records.filter(include_in_tax=True)
+        elif data["tax"] == "untaxed":
+            records = records.filter(include_in_tax=False)
+        if resource == "expenses":
+            if data.get("paid") == "paid":
+                records = records.filter(is_paid=True)
+            elif data.get("paid") == "unpaid":
+                records = records.filter(is_paid=False)
         if data["start"]:
             records = records.filter(date__gte=data["start"])
         if data["end"]:
@@ -560,6 +601,9 @@ def record_export(request, resource):
     writer = csv.writer(response)
     header = ["title", "date", "farm", "category", contact_attr, "document_type",
               "include_in_tax", "amount", "description"]
+    if resource == "expenses":
+        header = ["title", "date", "farm", "category", contact_attr, "document_type",
+                  "include_in_tax", "is_paid", "amount", "description"]
     if resource == "incomes":
         header = ["title", "date", "farms", "unallocated", "category", contact_attr,
                   "document_type", "include_in_tax", "amount", "description"]
@@ -574,9 +618,11 @@ def record_export(request, resource):
                              str(item.category), str(contact) if contact else "", item.document_type,
                              "yes" if item.include_in_tax else "no", f"{item.amount:.2f}", item.description])
         else:
-            writer.writerow([item.title, item.date.isoformat(), str(item.farm), str(item.category),
+            farm_label = str(item.farm) if item.farm_id else "All farms (split)"
+            writer.writerow([item.title, item.date.isoformat(), farm_label, str(item.category),
                              str(contact) if contact else "", item.document_type,
-                             "yes" if item.include_in_tax else "no", f"{item.amount:.2f}", item.description])
+                             "yes" if item.include_in_tax else "no",
+                             "yes" if item.is_paid else "no", f"{item.amount:.2f}", item.description])
     return response
 
 
@@ -605,7 +651,7 @@ def record_form(request, resource, pk=None):
         return redirect("record-list", resource=resource)
     prerequisites = False
     if spec.kind == "transaction":
-        prerequisites = (resource == "expenses" and not Farm.objects.filter(profile=profile).exists()) or not form.fields["category"].queryset.exists()
+        prerequisites = not form.fields["category"].queryset.exists()
     elif spec.kind == "tree":
         prerequisites = not Farm.objects.filter(profile=profile).exists() or not TreeType.objects.filter(profile=profile).exists()
     elif spec.kind == "task":
