@@ -230,7 +230,7 @@ class FarmTask(models.Model):
         if self.expense_id:
             if self.expense.profile_id != self.profile_id:
                 raise ValidationError({"expense": "Expense must belong to the same profile."})
-            if self.farm_id and self.expense.farm_id != self.farm_id:
+            if self.farm_id and self.expense.farm_id and self.expense.farm_id != self.farm_id:
                 raise ValidationError({"expense": "Expense must belong to the selected farm."})
 
     def __str__(self) -> str:

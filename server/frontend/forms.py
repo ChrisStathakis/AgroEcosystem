@@ -43,6 +43,7 @@ EL_FIELD_LABELS = {
     "customer": "Πελάτης",
     "document_type": "Τύπος παραστατικού",
     "include_in_tax": "Συμπερίληψη στην εφορία",
+    "is_paid": "Πληρωμένο",
     "is_archived": "Αρχειοθετημένο",
     "description": "Περιγραφή",
     "name": "Όνομα",
@@ -71,6 +72,7 @@ EL_FIELD_LABELS = {
     "customer": "Πελάτης",
     "document_type": "Τύπος παραστατικού",
     "tax": "Εφορία",
+    "paid": "Πληρωμή",
 }
 
 EL_DOCUMENT_CHOICES = [("invoice", "Τιμολόγιο"), ("receipt", "Απόδειξη")]
@@ -167,8 +169,17 @@ class FarmForm(OwnedForm):
 class ExpenseForm(OwnedForm):
     class Meta:
         model = Expense
-        fields = ["title", "date", "amount", "farm", "category", "vendor", "document_type", "include_in_tax", "is_archived", "description"]
+        fields = ["title", "date", "amount", "farm", "category", "vendor", "document_type", "include_in_tax", "is_paid", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "farm" in self.fields:
+            self.fields["farm"].required = False
+            self.fields["farm"].empty_label = (
+                "Όλες οι φάρμες — επιμερισμός με δέντρα" if in_greek()
+                else "All farms — split by trees"
+            )
 
 
 class IncomeForm(OwnedForm):
@@ -340,7 +351,7 @@ class FarmTaskForm(OwnedForm):
             expenses = Expense.objects.select_related("farm").filter(
                 Q(is_archived=False) | Q(pk=getattr(self.instance, "expense_id", None)))
             if farm is not None:
-                expenses = expenses.filter(farm=farm)
+                expenses = expenses.filter(Q(farm=farm) | Q(farm__isnull=True))
             self.fields["expense"].queryset = expenses.filter(profile=self.instance.profile)
             self.fields["expense"].required = False
         apply_greek_labels(self)
@@ -352,7 +363,7 @@ class FarmTaskForm(OwnedForm):
         if farm and planting and planting.farm_id != farm.id:
             raise ValidationError({"planting": "Η ομάδα δέντρων πρέπει να ανήκει στην επιλεγμένη φάρμα." if in_greek() else "Tree group must belong to the selected farm."})
         expense = data.get("expense")
-        if farm and expense and expense.farm_id != farm.id:
+        if farm and expense and expense.farm_id and expense.farm_id != farm.id:
             raise ValidationError({"expense": "Το έξοδο πρέπει να ανήκει στην επιλεγμένη φάρμα." if in_greek() else "Expense must belong to the selected farm."})
         return data
 
@@ -371,14 +382,48 @@ class ProfileForm(forms.ModelForm):
 class TransactionFilterForm(forms.Form):
     q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Search transactions…"}))
     farm = forms.ModelChoiceField(queryset=Farm.objects.none(), required=False, empty_label="All farms")
+    category = forms.ModelChoiceField(queryset=ExpenseCategory.objects.none(), required=False, empty_label="All categories")
+    contact = forms.ModelChoiceField(queryset=Vendor.objects.none(), required=False, empty_label="All contacts")
+    document_type = forms.ChoiceField(required=False, label="Document",
+                                      choices=[("", "All documents"), ("invoice", "Invoice"), ("receipt", "Receipt")])
+    tax = forms.ChoiceField(required=False, label="Tax",
+                            choices=[("all", "All records"), ("taxed", "Tax flagged only"), ("untaxed", "Unflagged only")])
+    paid = forms.ChoiceField(required=False, label="Payment",
+                             choices=[("all", "All"), ("paid", "Paid only"), ("unpaid", "Unpaid only")])
     start = forms.DateField(required=False, label="From", widget=forms.DateInput(attrs={"type": "date"}))
     end = forms.DateField(required=False, label="To", widget=forms.DateInput(attrs={"type": "date"}))
 
-    def __init__(self, *args, profile, **kwargs):
+    def __init__(self, *args, profile, resource="expenses", **kwargs):
         super().__init__(*args, **kwargs)
+        from incomes.models import Customer, IncomeCategory
+
         self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        if resource == "incomes":
+            self.fields["category"].queryset = IncomeCategory.objects.filter(profile=profile)
+            self.fields["contact"].queryset = Customer.objects.filter(profile=profile)
+            self.fields["contact"].label = "Customer"
+            contact_all = "All customers"
+            contact_all_el = "Όλοι οι πελάτες"
+            del self.fields["paid"]
+        else:
+            self.fields["category"].queryset = ExpenseCategory.objects.filter(profile=profile)
+            self.fields["contact"].queryset = Vendor.objects.filter(profile=profile)
+            self.fields["contact"].label = "Vendor"
+            contact_all = "All vendors"
+            contact_all_el = "Όλοι οι προμηθευτές"
+        self.fields["category"].empty_label = "All categories"
+        self.fields["contact"].empty_label = contact_all
         style_fields(self.fields)
         apply_greek_labels(self)
+        # Generic field names escape the analytics-specific Greek empty
+        # labels, so set the localized versions explicitly.
+        if in_greek():
+            self.fields["category"].empty_label = "Όλες οι κατηγορίες"
+            self.fields["contact"].empty_label = contact_all_el
+            self.fields["contact"].label = "Πελάτης" if resource == "incomes" else "Προμηθευτής"
+            if "paid" in self.fields:
+                self.fields["paid"].choices = [("all", "Όλα"), ("paid", "Μόνο πληρωμένα"),
+                                                ("unpaid", "Μόνο απλήρωτα")]
 
     def clean(self):
         data = super().clean()

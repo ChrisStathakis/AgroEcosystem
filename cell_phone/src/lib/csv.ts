@@ -10,6 +10,10 @@ function money(n: number | string): string {
   return Number(n ?? 0).toFixed(2);
 }
 
+/**
+ * Port of server record_export. Mobile intentionally adds an is_archived column
+ * (superset of the website CSV) so archive state survives spreadsheet round-trips.
+ */
 export function transactionsToCSV(
   kind: 'expenses' | 'incomes',
   rows: (Expense | Income)[],

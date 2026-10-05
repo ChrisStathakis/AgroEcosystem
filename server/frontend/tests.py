@@ -230,6 +230,26 @@ class AnalyticsServicesTests(TestCase):
         self.assertIn("farmProfit", decoded)
         self.assertIn("cumulative", decoded)
 
+    def test_chart_data_script_decodes_to_object(self):
+        import json
+        import re
+
+        user, profile, farm = make_full_workspace()
+        self.client.force_login(user)
+        cases = [("/en/analytics/", {"expenseCategories", "farmProfit", "cumulative"}),
+                 ("/en/analytics/cash-flow/", {"labels", "flows", "running"})]
+        for path, keys in cases:
+            content = self.client.get(path).content.decode()
+            match = re.search(r'<script id="chart-data" type="application/json">(.*?)</script>',
+                              content, re.DOTALL)
+            self.assertIsNotNone(match, path)
+            # json_script must receive the dict itself: double-encoded data
+            # parses back to a string and leaves every chart blank.
+            data = json.loads(match.group(1))
+            self.assertIsInstance(data, dict, path)
+            for key in keys:
+                self.assertIn(key, data, path)
+
     def test_analytics_page_contains_new_charts(self):
         user, profile, farm = make_full_workspace()
         self.client.force_login(user)
@@ -453,6 +473,106 @@ class AnalyticsFilterReportTests(TestCase):
         response = self.client.get("/en/analytics/cash-flow/?print=1")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["print_mode"])
+
+
+class ObligationsTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        self.user, self.profile, self.north, self.expense_category, self.income_category = make_workspace()
+        self.south = Farm.objects.create(profile=self.profile, title="South", size="1.00")
+        olive = TreeType.objects.create(profile=self.profile, name="Olive")
+        record_tree_movement(profile=self.profile, farm=self.north, tree_type=olive, action="add", quantity=30)
+        orange = TreeType.objects.create(profile=self.profile, name="Orange")
+        record_tree_movement(profile=self.profile, farm=self.south, tree_type=orange, action="add", quantity=10)
+        self.today = timezone.localdate()
+        Expense.objects.create(profile=self.profile, farm=self.north, category=self.expense_category,
+                               title="Paid north", amount="10.00", document_type="receipt",
+                               is_paid=True, date=self.today)
+        Expense.objects.create(profile=self.profile, category=self.expense_category,
+                               title="Unpaid shared", amount="100.00", document_type="receipt",
+                               is_paid=False, date=self.today - timezone.timedelta(days=5))
+        Expense.objects.create(profile=self.profile, farm=self.south, category=self.expense_category,
+                               title="South owed", amount="40.00", document_type="receipt",
+                               is_paid=False, date=self.today)
+        self.client.force_login(self.user)
+
+    def wide_filters(self):
+        import datetime
+
+        return {"start": datetime.date(2020, 1, 1), "end": self.today}
+
+    def test_report_splits_shared_unpaid_by_trees(self):
+        from analytics.services import obligations_report
+
+        report = obligations_report(self.profile, filters=self.wide_filters())
+        self.assertEqual(report["unpaid_total"], Decimal("140.00"))
+        self.assertEqual(report["overdue_total"], Decimal("100.00"))
+        self.assertEqual(report["count"], 2)
+        by_farm = {row["farm"]: row for row in report["farms"]}
+        self.assertEqual(by_farm["North"]["unpaid"], Decimal("75.00"))
+        self.assertEqual(by_farm["South"]["unpaid"], Decimal("65.00"))
+        self.assertEqual(by_farm["North"]["overdue"], Decimal("75.00"))
+        self.assertEqual(by_farm["South"]["overdue"], Decimal("25.00"))
+
+    def test_report_honors_farm_filter(self):
+        from analytics.services import obligations_report
+
+        report = obligations_report(self.profile, filters={**self.wide_filters(), "farm": self.south})
+        self.assertEqual(report["unpaid_total"], Decimal("65.00"))
+        self.assertEqual(report["overdue_total"], Decimal("25.00"))
+        self.assertEqual([row["farm"] for row in report["farms"]], ["South"])
+
+    def test_pages_render_both_languages_without_paid_items(self):
+        english = self.client.get("/en/analytics/obligations/")
+        self.assertEqual(english.status_code, 200)
+        self.assertContains(english, "Obligations")
+        self.assertNotContains(english, "Paid north")
+        greek = self.client.get("/el/analytics/obligations/")
+        self.assertEqual(greek.status_code, 200)
+        self.assertContains(greek, "Υποχρεώσεις")
+
+    def test_export_contains_only_unpaid(self):
+        body = self.client.get(
+            f"/en/analytics/export/obligations/?start=2020-01-01&end={self.today.isoformat()}").content.decode()
+        self.assertIn("Unpaid shared", body)
+        self.assertNotIn("Paid north", body)
+        self.assertTrue(body.splitlines()[0].startswith("title,date,farm"))
+
+    def test_expense_list_paid_filter(self):
+        listing = self.client.get("/en/expenses/")
+        self.assertContains(listing, 'name="paid"')
+        self.assertContains(listing, "South owed")
+        unpaid = self.client.get("/en/expenses/?paid=unpaid")
+        self.assertContains(unpaid, "South owed")
+        self.assertNotContains(unpaid, "Paid north")
+        paid = self.client.get("/en/expenses/?paid=paid")
+        self.assertContains(paid, "Paid north")
+        self.assertNotContains(paid, "South owed")
+        incomes = self.client.get("/en/incomes/")
+        self.assertNotContains(incomes, 'name="paid"')
+
+    def test_expense_form_defaults_to_paid(self):
+        form = self.client.get("/en/expenses/new/").context["form"]
+        self.assertIn("is_paid", form.fields)
+        self.assertTrue(form["is_paid"].value())
+        self.client.post("/en/expenses/new/", {
+            "title": "Owe", "date": self.today.isoformat(), "amount": "5.00",
+            "category": str(self.expense_category.pk), "document_type": "receipt"})
+        self.assertFalse(Expense.objects.get(profile=self.profile, title="Owe").is_paid)
+
+    def test_backup_preserves_is_paid_and_legacy_defaults_paid(self):
+        from frontend.backup import build_backup, destroy_workspace, restore_backup
+
+        payload = build_backup(self.profile)
+        by_title = {item["title"]: item for item in payload["expenses"]}
+        self.assertFalse(by_title["Unpaid shared"]["is_paid"])
+        self.assertTrue(by_title["Paid north"]["is_paid"])
+        for item in payload["expenses"]:
+            item.pop("is_paid")
+        destroy_workspace(self.profile)
+        restore_backup(self.profile, payload, mode="replace")
+        self.assertTrue(Expense.objects.get(profile=self.profile, title="Unpaid shared").is_paid)
 
 
 class QuickCreateTests(TestCase):

@@ -91,11 +91,11 @@ def build_backup(profile) -> dict:
         "tree_movements": [{"planting": planting_idx[m.planting_id], "action": m.action,
                              "quantity": m.quantity, "effective_date": m.effective_date.isoformat(),
                              "notes": m.notes} for m in movements],
-        "expenses": [{"farm": farm_idx[e.farm_id], "category": expense_category_idx[e.category_id],
+        "expenses": [{"farm": farm_idx[e.farm_id] if e.farm_id else None, "category": expense_category_idx[e.category_id],
                       "vendor": vendor_idx[e.vendor_id] if e.vendor_id else None,
                       "title": e.title, "description": e.description, "amount": str(e.amount),
                       "date": e.date.isoformat(), "document_type": e.document_type,
-                      "include_in_tax": e.include_in_tax, "is_archived": e.is_archived} for e in expenses],
+                      "include_in_tax": e.include_in_tax, "is_paid": e.is_paid, "is_archived": e.is_archived} for e in expenses],
         "incomes": [{"allocations": [{"farm": farm_idx[a.farm_id], "amount": str(a.amount)}
                                         for a in i.allocations.all()],
                      "category": income_category_idx[i.category_id],
@@ -239,7 +239,9 @@ def restore_backup(profile, payload, mode="replace") -> dict:
 
     expenses = []
     for item in _require_list(payload, "expenses"):
-        farm = _require_index(farms, item.get("farm"), "expenses", "farm")
+        farm = None
+        if item.get("farm") is not None:
+            farm = _require_index(farms, item.get("farm"), "expenses", "farm")
         category = _require_index(expense_categories, item.get("category"), "expenses", "category")
         vendor = None
         if item.get("vendor") is not None:
@@ -256,6 +258,7 @@ def restore_backup(profile, payload, mode="replace") -> dict:
                           amount=item.get("amount", 0), date=item.get("date"),
                           document_type=_checked_document(item.get("document_type"), "expenses"),
                           include_in_tax=bool(item.get("include_in_tax", False)),
+                          is_paid=bool(item.get("is_paid", True)),
                           is_archived=bool(item.get("is_archived", False)))
         expense.full_clean()
         expense.save()

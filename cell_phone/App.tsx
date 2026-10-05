@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { migrate } from './src/db/client';
 import { seedDefaults } from './src/db/seed';
+import { loadLang } from './src/lib/i18n';
 import { AppNavigator } from './src/navigation/AppNavigator';
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        await loadLang();
         await migrate();
         await seedDefaults();
         setReady(true);

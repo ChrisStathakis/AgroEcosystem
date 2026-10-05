@@ -347,17 +347,44 @@ export async function availableYears(): Promise<number[]> {
   return [...years].sort((a, b) => b - a);
 }
 
-export function describeFilters(f: AnalyticsFilters, periodLabel?: string): string {
+export function describeFilters(f: AnalyticsFilters, periodLabel?: string, names?: Record<string, string>): string {
   const parts: string[] = [];
   parts.push(`Period: ${periodLabel ?? (f.year ? String(f.year) : [f.start, f.end].filter(Boolean).join(' – ') || 'custom')}`);
-  if (f.farm_id) parts.push(`Farm #${f.farm_id}`);
-  if (f.expense_category_id) parts.push(`Expense category #${f.expense_category_id}`);
-  if (f.income_category_id) parts.push(`Income category #${f.income_category_id}`);
-  if (f.vendor_id) parts.push(`Vendor #${f.vendor_id}`);
-  if (f.customer_id) parts.push(`Customer #${f.customer_id}`);
-  if (f.document_type) parts.push(`Document: ${f.document_type}`);
+  if (f.farm_id) parts.push(`Farm: ${names?.[`farm:${f.farm_id}`] ?? `#${f.farm_id}`}`);
+  if (f.expense_category_id) parts.push(`Expense category: ${names?.[`expense_category:${f.expense_category_id}`] ?? `#${f.expense_category_id}`}`);
+  if (f.income_category_id) parts.push(`Income category: ${names?.[`income_category:${f.income_category_id}`] ?? `#${f.income_category_id}`}`);
+  if (f.vendor_id) parts.push(`Vendor: ${names?.[`vendor:${f.vendor_id}`] ?? `#${f.vendor_id}`}`);
+  if (f.customer_id) parts.push(`Customer: ${names?.[`customer:${f.customer_id}`] ?? `#${f.customer_id}`}`);
+  if (f.document_type) parts.push(`Document: ${f.document_type === 'invoice' ? 'Invoice' : 'Receipt'}`);
   if (f.tax && f.tax !== 'all') parts.push(`Tax: ${f.tax === 'taxed' ? 'Taxed only' : 'Untaxed only'}`);
   return parts.join(' · ');
+}
+
+/** Resolve human-readable names for active filter IDs (mirrors server describe_filters). */
+export async function describeFiltersWithNames(f: AnalyticsFilters, periodLabel?: string): Promise<string> {
+  const db = getDb();
+  const names: Record<string, string> = {};
+  const lookup = async (table: string, key: string, id: number | null | undefined) => {
+    if (!id) return;
+    try {
+      const row = await db.getFirstAsync<{ name?: string; title?: string }>(`SELECT name, title FROM ${table} WHERE id = ? AND profile_id = ?`, [id, SINGLE_PROFILE_ID] as any);
+      const label = (row as any)?.title ?? (row as any)?.name;
+      if (label) names[`${key}:${id}`] = String(label);
+    } catch {
+      // best-effort; fallback to #id
+    }
+  };
+  await lookup('farms', 'farm', f.farm_id);
+  await lookup('expense_categories', 'expense_category', f.expense_category_id);
+  await lookup('income_categories', 'income_category', f.income_category_id);
+  await lookup('vendors', 'vendor', f.vendor_id);
+  await lookup('customers', 'customer', f.customer_id);
+  return describeFilters(f, periodLabel, names);
+}
+
+/** Sanitize period labels for filenames (mirrors server analytics_export). */
+export function sanitizePeriodForFilename(period: string): string {
+  return period.replace(/ – /g, '_').replace(/ /g, '') || 'all';
 }
 
 export async function recentTransactions(limit = 6) {

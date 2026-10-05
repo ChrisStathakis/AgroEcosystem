@@ -1,7 +1,7 @@
 import { getDb } from '../client';
 import { nowISO, SINGLE_PROFILE_ID, type TreeInventoryMovement, type TreeMovementAction, type TreePlanting } from '../types';
 import type { SQLiteBindValue } from 'expo-sqlite';
-import { assertISODate, assertPositiveCount } from '../../lib/validation';
+import { assertISODate, assertNonNegativeCount, assertPositiveCount } from '../../lib/validation';
 
 export async function listPlantings(farmId?: number, query = ''): Promise<TreePlanting[]> {
   const db = getDb();
@@ -80,9 +80,35 @@ export async function recordTreeMovement(input: {
   return movementId;
 }
 
-/** Compatibility wrapper for callers that used the old create operation. */
+/**
+ * Direct planting creation (mirrors server TreePlantingForm count >= 0).
+ * count=0 creates an empty group with no movement (hidden from inventory, kept in history);
+ * count>0 records an opening 'add' movement.
+ */
 export async function createPlanting(input: { farm_id: number; tree_type_id: number; count: number; planted_on?: string | null; notes?: string }): Promise<number> {
-  return recordTreeMovement({ farm_id: input.farm_id, tree_type_id: input.tree_type_id, action: 'add', quantity: input.count, effective_date: input.planted_on, notes: input.notes });
+  assertNonNegativeCount(input.count);
+  if (input.count > 0) {
+    return recordTreeMovement({ farm_id: input.farm_id, tree_type_id: input.tree_type_id, action: 'add', quantity: input.count, effective_date: input.planted_on, notes: input.notes });
+  }
+  const db = getDb();
+  const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [input.farm_id]);
+  const treeType = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.tree_type_id]);
+  if (!farm || farm.profile_id !== SINGLE_PROFILE_ID || !treeType || treeType.profile_id !== SINGLE_PROFILE_ID) {
+    throw new Error('Farm and tree type must belong to this workspace.');
+  }
+  const existing = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM tree_plantings WHERE profile_id = ? AND farm_id = ? AND tree_type_id = ?',
+    [SINGLE_PROFILE_ID, input.farm_id, input.tree_type_id],
+  );
+  if (existing) return existing.id;
+  const now = nowISO();
+  const effectiveDate = input.planted_on || new Date().toISOString().slice(0, 10);
+  assertISODate(effectiveDate, 'Planted on');
+  const created = await db.runAsync(
+    'INSERT INTO tree_plantings (profile_id, farm_id, tree_type_id, count, planted_on, notes, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)',
+    [SINGLE_PROFILE_ID, input.farm_id, input.tree_type_id, effectiveDate, input.notes ?? '', now, now],
+  );
+  return created.lastInsertRowId;
 }
 
 export async function deletePlanting(_id: number): Promise<void> {
