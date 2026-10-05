@@ -15,6 +15,8 @@ export function ContactsScreen({ route }: any) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [notes, setNotes] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const refresh = useCallback(async () => {
     setRows(kind === 'vendors' ? await listVendors(q) : await listCustomers(q));
@@ -22,13 +24,13 @@ export function ContactsScreen({ route }: any) {
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const reset = () => {
-    setName(''); setPhone(''); setEmail(''); setEditingId(null);
+    setName(''); setPhone(''); setEmail(''); setAddress(''); setNotes(''); setEditingId(null);
   };
 
   const submit = async () => {
     try {
-      if (editingId) await updateContact(kind, editingId, { name, phone, email });
-      else await createContact(kind, { name, phone, email });
+      if (editingId) await updateContact(kind, editingId, { name, phone, email, address, notes });
+      else await createContact(kind, { name, phone, email, address, notes });
       reset();
       refresh();
     } catch (e: any) {
@@ -49,6 +51,8 @@ export function ContactsScreen({ route }: any) {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 15, fontWeight: '800', color: theme.ink }}>{r.name}</Text>
               <Text style={{ fontSize: 12.5, color: theme.muted }}>{[r.phone, r.email].filter(Boolean).join(' · ') || '—'}</Text>
+              {r.address ? <Text style={{ fontSize: 12.5, color: theme.muted }}>{r.address}</Text> : null}
+              {r.notes ? <Text style={{ fontSize: 12.5, color: theme.muted, fontStyle: 'italic' }} numberOfLines={2}>{r.notes}</Text> : null}
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -59,6 +63,7 @@ export function ContactsScreen({ route }: any) {
                 onPress={() => {
                   setEditingId(r.id);
                   setName(r.name); setPhone(r.phone ?? ''); setEmail(r.email ?? '');
+                  setAddress(r.address ?? ''); setNotes(r.notes ?? '');
                 }}
               />
             </View>
@@ -73,6 +78,8 @@ export function ContactsScreen({ route }: any) {
         <AppInput label="Name" value={name} onChangeText={setName} icon="person-outline" />
         <AppInput label="Phone" placeholder="Optional" value={phone} onChangeText={setPhone} keyboardType="phone-pad" icon="call-outline" />
         <AppInput label="Email" placeholder="Optional" value={email} onChangeText={setEmail} keyboardType="email-address" icon="mail-outline" />
+        <AppInput label="Address" placeholder="Optional" value={address} onChangeText={setAddress} icon="location-outline" />
+        <AppInput label="Notes" placeholder="Optional" value={notes} onChangeText={setNotes} icon="document-text-outline" />
         <AppButton title={editingId ? 'Save' : 'Create'} icon="checkmark-circle" onPress={submit} />
         {editingId ? <View style={{ height: 8 }} /> : null}
         {editingId ? <AppButton title="Cancel" variant="ghost" onPress={reset} /> : null}

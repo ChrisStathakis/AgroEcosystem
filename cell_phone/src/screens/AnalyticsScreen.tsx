@@ -5,33 +5,54 @@ import {
   availableYears, cashFlowReport, categoryBreakdown, describeFilters, farmProfit, financialSummary,
   profitLossReport, taxReport,
 } from '../db/repositories/analytics';
-import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary } from '../db/types';
+import { listFarms } from '../db/repositories/farms';
+import { listLookups } from '../db/repositories/lookups';
+import { listCustomers, listVendors } from '../db/repositories/contacts';
+import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary, MonthlyRow } from '../db/types';
 import { MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { fmt, theme } from '../components/theme';
 import { cashFlowToCSV, exportReportAndShare, overviewToCSV, profitLossToCSV, taxToCSV } from '../lib/csv';
 import { localizeCategoryName, localizeFarmName, localizeMonthLabel, t } from '../lib/i18n';
-import { AppButton, AppInput, Badge, Card, EmptyState, RowCard, SegmentedTabs, SectionTitle, Skeleton } from '../components/ui';
+import { AppButton, AppInput, AppSelect, Badge, Card, EmptyState, RowCard, SegmentedTabs, SectionTitle, Skeleton, type SelectOption } from '../components/ui';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 type Tab = 'overview' | 'pl' | 'cf' | 'tax';
+type DocFilter = '' | 'invoice' | 'receipt';
+type TaxFilter = 'all' | 'taxed' | 'untaxed';
+
+interface FilterOptions {
+  farms: SelectOption[];
+  expenseCats: SelectOption[];
+  incomeCats: SelectOption[];
+  vendors: SelectOption[];
+  customers: SelectOption[];
+}
 
 export function AnalyticsScreen() {
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [farms, setFarms] = useState<FarmProfitRow[]>([]);
   const [cats, setCats] = useState<{ expenses: CategoryTotal[]; incomes: CategoryTotal[] } | null>(null);
-  const [cf, setCf] = useState<{ rows: CashFlowRow[] } | null>(null);
-  const [tax, setTax] = useState<{ incomes: any[]; expenses: any[] } | null>(null);
+  const [cf, setCf] = useState<{ rows: CashFlowRow[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
+  const [pl, setPl] = useState<{ monthly: MonthlyRow[]; farms: FarmProfitRow[]; income_categories: CategoryTotal[]; expense_categories: CategoryTotal[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
+  const [tax, setTax] = useState<{ incomes: any[]; expenses: any[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
-  const [farmId, setFarmId] = useState('');
+  const [farmId, setFarmId] = useState<string>('');
+  const [expenseCat, setExpenseCat] = useState<string>('');
+  const [incomeCat, setIncomeCat] = useState<string>('');
+  const [vendorId, setVendorId] = useState<string>('');
+  const [customerId, setCustomerId] = useState<string>('');
+  const [doc, setDoc] = useState<DocFilter>('');
+  const [taxF, setTaxF] = useState<TaxFilter>('all');
   const [years, setYears] = useState<number[]>([]);
   const [desc, setDesc] = useState('');
+  const [opts, setOpts] = useState<FilterOptions>({ farms: [], expenseCats: [], incomeCats: [], vendors: [], customers: [] });
 
   const filters = useCallback((): AnalyticsFilters => {
-    const f: AnalyticsFilters = { tax: 'all' };
+    const f: AnalyticsFilters = { tax: taxF };
     if (start || end) {
       if (start) f.start = start;
       if (end) f.end = end;
@@ -39,8 +60,26 @@ export function AnalyticsScreen() {
       f.year = Number(year);
     }
     if (farmId) f.farm_id = Number(farmId);
+    if (expenseCat) f.expense_category_id = Number(expenseCat);
+    if (incomeCat) f.income_category_id = Number(incomeCat);
+    if (vendorId) f.vendor_id = Number(vendorId);
+    if (customerId) f.customer_id = Number(customerId);
+    if (doc) f.document_type = doc;
     return f;
-  }, [year, start, end, farmId]);
+  }, [year, start, end, farmId, expenseCat, incomeCat, vendorId, customerId, doc, taxF]);
+
+  const loadOptions = useCallback(async () => {
+    const [farmRows, eCats, iCats, vendors, customers] = await Promise.all([
+      listFarms(), listLookups('expense_categories'), listLookups('income_categories'), listVendors(), listCustomers(),
+    ]);
+    setOpts({
+      farms: farmRows.map((f) => ({ id: f.id, label: f.title, sub: `#${f.id}` })),
+      expenseCats: eCats.map((c) => ({ id: c.id, label: c.name })),
+      incomeCats: iCats.map((c) => ({ id: c.id, label: c.name })),
+      vendors: vendors.map((v: any) => ({ id: v.id, label: v.name })),
+      customers: customers.map((c: any) => ({ id: c.id, label: c.name })),
+    });
+  }, []);
 
   const load = useCallback(async () => {
     const f = filters();
@@ -48,16 +87,22 @@ export function AnalyticsScreen() {
     setSummary(s);
     setFarms(await farmProfit(f));
     setCats(await categoryBreakdown(f));
-    const cfReport = await cashFlowReport(f);
-    setCf(cfReport);
-    setTax(await taxReport(f));
+    setCf(await cashFlowReport(f) as any);
+    setPl(await profitLossReport(f) as any);
+    setTax(await taxReport(f) as any);
     setYears(await availableYears());
     setDesc(describeFilters(f, s.period_label));
   }, [filters]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { loadOptions().catch(() => {}); load(); }, [load, loadOptions]));
 
   if (!summary) return <Screen title={t('analytics')}><Skeleton height={150} /><Skeleton height={170} /><Skeleton height={120} /></Screen>;
+
+  const resetFilters = () => {
+    setYear(String(new Date().getFullYear())); setStart(''); setEnd('');
+    setFarmId(''); setExpenseCat(''); setIncomeCat(''); setVendorId(''); setCustomerId('');
+    setDoc(''); setTaxF('all');
+  };
 
   const exportCurrent = async () => {
     try {
@@ -65,13 +110,13 @@ export function AnalyticsScreen() {
       if (tab === 'overview' && summary) {
         await exportReportAndShare(`analytics-overview-${summary.period_label}`, overviewToCSV(summary));
       } else if (tab === 'pl') {
-        const pl = await profitLossReport(f);
-        await exportReportAndShare(`analytics-pl-${pl.period_label}`, profitLossToCSV(pl));
+        const report = pl ?? await profitLossReport(f);
+        await exportReportAndShare(`analytics-pl-${report.period_label}`, profitLossToCSV(report as any));
       } else if (tab === 'cf') {
-        const cfR = await cashFlowReport(f);
-        await exportReportAndShare(`analytics-cf-${cfR.period_label}`, cashFlowToCSV(cfR));
+        const cfR = cf ?? await cashFlowReport(f);
+        await exportReportAndShare(`analytics-cf-${cfR.period_label}`, cashFlowToCSV(cfR as any));
       } else {
-        const tx = await taxReport(f);
+        const tx = tax ?? await taxReport(f);
         await exportReportAndShare(`analytics-tax-${tx.period_label}`, taxToCSV(tx as any));
       }
     } catch (e: any) {
@@ -91,11 +136,51 @@ export function AnalyticsScreen() {
         <Card>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}><AppInput label="Year" value={year} onChangeText={setYear} keyboardType="number-pad" /></View>
-            <View style={{ flex: 1 }}><AppInput label="Farm id" placeholder="Optional" value={farmId} onChangeText={setFarmId} keyboardType="number-pad" /></View>
+            <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: 10 }}>
+              <AppButton title="Reset" variant="ghost" onPress={resetFilters} />
+            </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
-            <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>
+            <View style={{ flex: 1 }}><AppInput label="From YYYY-MM-DD" placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
+            <View style={{ flex: 1 }}><AppInput label="To YYYY-MM-DD" placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>
+          </View>
+          <AppSelect label="Farm" placeholder="All farms" value={farmId || null} options={opts.farms} onChange={(id) => setFarmId(id == null ? '' : String(id))} />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <AppSelect label="Expense category" placeholder="All" value={expenseCat || null} options={opts.expenseCats} onChange={(id) => setExpenseCat(id == null ? '' : String(id))} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppSelect label="Income category" placeholder="All" value={incomeCat || null} options={opts.incomeCats} onChange={(id) => setIncomeCat(id == null ? '' : String(id))} />
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <AppSelect label="Vendor" placeholder="All vendors" value={vendorId || null} options={opts.vendors} onChange={(id) => setVendorId(id == null ? '' : String(id))} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppSelect label="Customer" placeholder="All customers" value={customerId || null} options={opts.customers} onChange={(id) => setCustomerId(id == null ? '' : String(id))} />
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <AppSelect
+                label="Document"
+                placeholder="All documents"
+                value={doc || null}
+                options={[{ id: 'invoice', label: 'Invoice' }, { id: 'receipt', label: 'Receipt' }]}
+                onChange={(id) => setDoc((id as DocFilter) ?? '')}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppSelect
+                label="Tax"
+                placeholder="All records"
+                value={taxF}
+                options={[{ id: 'all', label: 'All records' }, { id: 'taxed', label: 'Tax flagged only' }, { id: 'untaxed', label: 'Unflagged only' }]}
+                onChange={(id) => setTaxF(((id as TaxFilter) ?? 'all'))}
+                allowClear={false}
+              />
+            </View>
           </View>
           <AppButton title="Apply" variant="secondary" icon="filter" onPress={load} />
         </Card>
@@ -125,6 +210,13 @@ export function AnalyticsScreen() {
 
         {tab === 'overview' && (
           <View>
+            <SectionTitle title="Monthly breakdown" />
+            <Card>
+              {(summary.monthly ?? []).map((m) => (
+                <Row key={`${m.year}-${m.month}`} label={`${localizeMonthLabel(m.label)}`} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} />
+              ))}
+              <Row label="Period total" value={fmt(summary.balance)} bold />
+            </Card>
             <SectionTitle title="Profit per farm" />
             {farms.length === 0 && <EmptyState icon="leaf-outline" title="No farm profit yet" />}
             {farms.map((farm) => (
@@ -145,26 +237,54 @@ export function AnalyticsScreen() {
           </View>
         )}
         {tab === 'pl' && (
-          <Card>
-            <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Profit & loss · {summary.period_label}</Text>
-            {summary.monthly.map((m) => (
-              <Text key={`${m.year}-${m.month}`} style={{ paddingVertical: 4, color: theme.inkSoft }}>{localizeMonthLabel(m.label)}: {fmt(m.income)} − {fmt(m.expense)} = {fmt(m.balance)}</Text>
-            ))}
-          </Card>
+          <View>
+            <SectionTitle title={`Profit & loss · ${pl?.period_label ?? summary.period_label}`} />
+            <Card>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By month</Text>
+              {(pl?.monthly ?? summary.monthly).map((m: any) => (
+                <Row key={`${m.year}-${m.month}`} label={localizeMonthLabel(m.label)} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} />
+              ))}
+            </Card>
+            <View style={{ height: 10 }} />
+            <Card>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By farm</Text>
+              {(pl?.farms ?? []).map((r) => (
+                <Row key={r.farm} label={`${localizeFarmName(r.farm)}`} value={`in ${fmt(r.income)} · out ${fmt(r.expense)} · net ${fmt(r.net)}`} />
+              ))}
+              {(pl?.farms ?? []).length === 0 && <Text style={{ color: theme.muted }}>No farm rows for these filters.</Text>}
+            </Card>
+            <View style={{ height: 10 }} />
+            <Card>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By category</Text>
+              {(pl?.income_categories ?? []).map((c) => (
+                <Text key={`pi-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>Income · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
+              ))}
+              {(pl?.expense_categories ?? []).map((c) => (
+                <Text key={`pe-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>Expense · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
+              ))}
+              <Row label="Net" value={fmt(pl?.net ?? summary.balance)} bold />
+            </Card>
+          </View>
         )}
         {tab === 'cf' && (
           <Card>
             <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Cash flow (running balance)</Text>
             {(cf?.rows ?? []).map((r) => (
-              <Text key={`${r.year}-${r.month}`} style={{ paddingVertical: 4, color: theme.inkSoft }}>{localizeMonthLabel(r.label)}: net {fmt(r.balance)} · running {fmt(r.running)}</Text>
+              <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} />
             ))}
+            {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>No cash movement for these filters.</Text>}
+            <Row label={`Total ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
           </Card>
         )}
         {tab === 'tax' && (
           <Card>
             <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Tax-flagged items</Text>
+            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 6 }}>Control this with the “Tax” checkbox on each income/expense. Guidance only.</Text>
             {(tax?.incomes ?? []).map((i: any) => <Text key={`i-${i.id}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>+{fmt(i.amount)} · {i.title} · {i.date}</Text>)}
             {(tax?.expenses ?? []).map((e: any) => <Text key={`e-${e.id}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>−{fmt(e.amount)} · {e.title} · {e.date}</Text>)}
+            <Row label="Taxable income" value={fmt(tax?.income_total ?? 0)} />
+            <Row label="Deductible expenses" value={fmt(tax?.expense_total ?? 0)} />
+            <Row label="Taxable net" value={fmt(tax?.net ?? 0)} bold />
           </Card>
         )}
         <View style={{ height: 12 }} />
@@ -177,9 +297,9 @@ export function AnalyticsScreen() {
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 }}>
-      <Text style={{ color: theme.muted, fontSize: 13.5 }}>{label}</Text>
-      <Text style={{ color: theme.ink, fontWeight: bold ? '800' : '700', fontSize: 13.5 }}>{value}</Text>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, gap: 10 }}>
+      <Text style={{ color: theme.muted, fontSize: 13.5, flex: 1 }}>{label}</Text>
+      <Text style={{ color: theme.ink, fontWeight: bold ? '800' : '700', fontSize: 13.5, textAlign: 'right' }}>{value}</Text>
     </View>
   );
 }

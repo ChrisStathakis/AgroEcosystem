@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { File, Paths } from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { getDb } from '../db/client';
 import { SINGLE_PROFILE_ID } from '../db/types';
@@ -17,6 +18,7 @@ export function SettingsScreen() {
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [preview, setPreview] = useState<Record<string, number> | null>(null);
   const [pending, setPending] = useState<any | null>(null);
+  const [pendingName, setPendingName] = useState('');
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
   const [confirmName, setConfirmName] = useState('');
 
@@ -29,22 +31,53 @@ export function SettingsScreen() {
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const downloadBackup = async () => {
-    const payload = await buildBackup();
-    const file = new File(Paths.cache, `agro-backup-${new Date().toISOString().slice(0, 10)}.json`);
-    file.write(JSON.stringify(payload, null, 2));
-    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'application/json' });
-    Alert.alert('Backup ready', file.uri);
+    try {
+      const payload = await buildBackup();
+      const file = new File(Paths.cache, `agro-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      file.write(JSON.stringify(payload, null, 2));
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'application/json' });
+      Alert.alert('Backup ready', file.uri);
+    } catch (e: any) {
+      Alert.alert('Backup failed', e.message);
+    }
   };
 
-  const importDemoBackup = async () => {
+  const previewCurrentData = async () => {
     const payload = await buildBackup();
     setPending(payload);
+    setPendingName('current workspace data');
     setPreview(describePayload(payload));
+  };
+
+  const pickBackupFile = async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
+      if (picked.canceled) return;
+      const asset = picked.assets[0];
+      const uri = asset.uri;
+      let text: string;
+      try {
+        const file = new File(uri);
+        text = await file.text();
+      } catch {
+        const res = await fetch(uri);
+        text = await res.text();
+      }
+      if (text.length > 5 * 1024 * 1024) throw new Error('This file is too large (5 MB limit).');
+      const payload = JSON.parse(text);
+      const desc = describePayload(payload);
+      setPending(payload);
+      setPendingName(asset.name ?? 'backup.json');
+      setPreview(desc);
+      Alert.alert('Backup loaded', `${asset.name ?? 'backup.json'}: ${Object.values(desc).reduce((a, b) => a + b, 0)} records found. Choose a mode, then Restore.`);
+    } catch (e: any) {
+      Alert.alert('Import failed', e.message ?? String(e));
+    }
   };
 
   const confirmRestore = async () => {
     if (!pending) {
-      Alert.alert('No backup', 'Build or load a backup first.');
+      Alert.alert('No backup', 'Pick a backup file (or preview current data) first.');
       return;
     }
     try {
@@ -53,6 +86,7 @@ export function SettingsScreen() {
       Alert.alert('Restore complete', `${total} records imported (${mode}).`);
       setPending(null);
       setPreview(null);
+      setPendingName('');
       refresh();
     } catch (e: any) {
       Alert.alert('Restore failed', e.message);
@@ -109,10 +143,13 @@ export function SettingsScreen() {
       <Card style={{ marginTop: 12 }}>
         <SectionTitle title="Backup" action={<Badge label={mode} tone="blue" />} />
         <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Current rows: {counts ? JSON.stringify(counts) : '…'}</Text>
+        <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Same JSON format as the website backup, including replace/merge modes.</Text>
         <AppButton title="Download backup (JSON)" icon="cloud-download-outline" variant="secondary" onPress={downloadBackup} />
         <View style={{ height: 8 }} />
-        <AppButton title="Preview current data" icon="eye-outline" variant="secondary" onPress={importDemoBackup} />
-        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Preview: {JSON.stringify(preview)}</Text> : null}
+        <AppButton title="Pick backup file…" icon="folder-open-outline" variant="secondary" onPress={pickBackupFile} />
+        <View style={{ height: 8 }} />
+        <AppButton title="Preview current data" icon="eye-outline" variant="secondary" onPress={previewCurrentData} />
+        {preview ? <Text style={{ marginTop: 8, color: theme.inkSoft, fontSize: 12.5 }}>Pending: {pendingName || 'backup'} — {JSON.stringify(preview)}</Text> : null}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
           <View style={{ flex: 1 }}>
             <AppButton title={`Mode: ${mode}`} variant="secondary" onPress={() => setMode(mode === 'replace' ? 'merge' : 'replace')} />

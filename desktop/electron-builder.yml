@@ -1,0 +1,22 @@
+appId: com.agroecosystem.app
+productName: AgroEcosystem
+directories:
+  output: dist
+files:
+  - main.js
+  - preload.js
+  - splash.html
+  - package.json
+extraResources:
+  - from: ../server/dist/agro-server
+    to: backend
+win:
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: AgroEcosystem
+portable:
+  artifactName: AgroEcosystem-portable.exe

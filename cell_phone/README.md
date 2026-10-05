@@ -8,9 +8,24 @@ Port of `server/` (Django) to React Native. No backend calls.
 npm install
 npm run android # or ios / start
 ```
-
 First launch creates `agro.db`, runs `src/db/schema.ts`, ensures
 profile id=1, and inserts starter categories (`src/db/seed.ts`).
+
+## Android APK (EAS)
+
+`eas.json` defines a `preview` profile that produces a shareable `.apk`
+(`android.buildType: apk`, package `com.agro.cellphone`, `versionCode` in
+`app.json`).
+
+```sh
+npm install -g eas-cli
+eas login
+eas build -p android --profile preview
+# download the .apk from the build page / QR, or:
+eas build:download -p android
+```
+
+`production` builds an `.aab` for Play Store submission instead.
 
 ## Map from Django
 

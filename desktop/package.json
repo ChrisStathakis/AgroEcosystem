@@ -1,0 +1,17 @@
+{
+  "name": "agroecosystem-desktop",
+  "version": "1.0.0",
+  "description": "AgroEcosystem farm manager — Django + Electron Windows app",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron .",
+    "dev:backend": "python ../server/run_desktop.py --port 8000",
+    "dist": "electron-builder --win nsis portable",
+    "pack": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.12"
+  }
+}

@@ -8,7 +8,7 @@ import type { FarmTask } from '../db/types';
 import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
 import { t } from '../lib/i18n';
-import { AppButton, AppInput, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
+import { AppButton, AppInput, AppSelect, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle, type SelectOption } from '../components/ui';
 import { theme } from '../components/theme';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
@@ -25,8 +25,11 @@ export function TasksScreen() {
   const [date, setDate] = useState(todayISODate());
   const [expenseId, setExpenseId] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [hint, setHint] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [farmOpts, setFarmOpts] = useState<SelectOption[]>([]);
+  const [catOpts, setCatOpts] = useState<SelectOption[]>([]);
+  const [plantingOpts, setPlantingOpts] = useState<SelectOption[]>([]);
+  const [expenseOpts, setExpenseOpts] = useState<SelectOption[]>([]);
 
   const refresh = useCallback(async () => {
     setRows(await listTasks({
@@ -40,11 +43,14 @@ export function TasksScreen() {
     try {
       const farms = await listFarms();
       const cats = await listLookups('task_categories');
-      setHint(`farms: ${farms.map((f) => `${f.id}=${f.title}`).join(', ') || 'none'} | categories: ${cats.map((c) => `${c.id}=${c.name}`).join(', ') || 'none'}`);
-      await listTaskExpenseOptions(farmId ? Number(farmId) : undefined);
-      await listTaskPlantingOptions(farmId ? Number(farmId) : undefined);
+      setFarmOpts(farms.map((f) => ({ id: f.id, label: f.title, sub: `#${f.id}` })));
+      setCatOpts(cats.map((c) => ({ id: c.id, label: c.name })));
+      const plantings = await listTaskPlantingOptions(farmId ? Number(farmId) : undefined);
+      setPlantingOpts(plantings.map((p) => ({ id: p.id, label: `#${p.id} · ${p.type_name} @ ${p.farm_title}` })));
+      const expenses = await listTaskExpenseOptions(farmId ? Number(farmId) : undefined);
+      setExpenseOpts(expenses.map((e) => ({ id: e.id, label: `#${e.id} · ${e.title} (${e.amount})`, sub: e.date })));
     } catch {
-      setHint('');
+      // keep previous options
     }
   }, [q, farmId, plantingId, categoryId, start, end]);
 
@@ -57,7 +63,7 @@ export function TasksScreen() {
 
   const submit = async () => {
     try {
-      if (!farmId || !categoryId) throw new Error('Farm id and category id are required.');
+      if (!farmId || !categoryId) throw new Error('Farm and category are required.');
       const payload = {
         farm_id: Number(farmId), planting_id: plantingId ? Number(plantingId) : null,
         category_id: Number(categoryId), expense_id: expenseId ? Number(expenseId) : null,
@@ -91,13 +97,12 @@ export function TasksScreen() {
           <Chip label="Apply filters" onPress={refresh} tone={theme.sage} />
         </View>
         <Card>
+          <AppSelect label="Farm" placeholder="All farms" value={farmId || null} options={farmOpts} onChange={(id) => setFarmId(id == null ? '' : String(id))} />
+          <AppSelect label="Category" placeholder="All categories" value={categoryId || null} options={catOpts} onChange={(id) => setCategoryId(id == null ? '' : String(id))} />
+          <AppSelect label="Tree group" placeholder="All tree groups" value={plantingId || null} options={plantingOpts} onChange={(id) => setPlantingId(id == null ? '' : String(id))} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}><AppInput placeholder="Farm id" value={farmId} onChangeText={setFarmId} keyboardType="number-pad" /></View>
-            <View style={{ flex: 1 }}><AppInput placeholder="Category id" value={categoryId} onChangeText={setCategoryId} keyboardType="number-pad" /></View>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
-            <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>
+            <View style={{ flex: 1 }}><AppInput label="From" placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
+            <View style={{ flex: 1 }}><AppInput label="To" placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>
           </View>
           <AppButton title="Apply filters" variant="secondary" icon="filter" onPress={refresh} />
         </Card>
@@ -112,6 +117,7 @@ export function TasksScreen() {
             </View>
             <Text style={{ fontSize: 15, fontWeight: '800', color: theme.ink, marginTop: 6 }}>{item.title}</Text>
             <Text style={{ fontSize: 12.5, color: theme.muted }}>{item.farm_title}{item.planting_label ? ` · ${item.planting_label}` : ''}</Text>
+            {item.description ? <Text style={{ fontSize: 12.5, color: theme.muted }} numberOfLines={2}>{item.description}</Text> : null}
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
               <View style={{ flex: 1 }}><AppButton title="Edit" variant="secondary" onPress={() => startEdit(item)} /></View>
               <View style={{ flex: 1 }}><AppButton title="Delete" variant="ghost" onPress={() => deleteTask(item.id).then(refresh).catch((e: Error) => Alert.alert('Error', e.message))} /></View>
@@ -124,14 +130,14 @@ export function TasksScreen() {
         ) : (
           <Card style={{ marginTop: 14 }}>
             <Text style={{ fontSize: 16, fontWeight: '800', color: theme.ink, marginBottom: 10 }}>{editingId ? 'Edit task' : 'Add task'}</Text>
-            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>{hint}</Text>
+            <AppSelect label="Farm" placeholder="Select farm…" value={farmId || null} options={farmOpts} onChange={(id) => setFarmId(id == null ? '' : String(id))} allowClear={false} />
+            <AppSelect label="Category" placeholder="Select category…" value={categoryId || null} options={catOpts} onChange={(id) => setCategoryId(id == null ? '' : String(id))} allowClear={false} />
+            <AppSelect label="Tree group (optional)" placeholder="Whole farm" value={plantingId || null} options={plantingOpts} onChange={(id) => setPlantingId(id == null ? '' : String(id))} />
+            <AppSelect label="Linked expense (optional)" placeholder="No expense" value={expenseId || null} options={expenseOpts} onChange={(id) => setExpenseId(id == null ? '' : String(id))} />
+            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>Tree group and expense must belong to the selected farm. Only active expenses can be newly linked.</Text>
             <AppInput label="Title" placeholder="e.g. Pruning" value={title} onChangeText={setTitle} icon="create-outline" />
             <AppInput label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
             <AppInput label="Date" placeholder="YYYY-MM-DD" value={date} onChangeText={setDate} icon="calendar-outline" />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <View style={{ flex: 1 }}><AppInput label="Planting id" value={plantingId} onChangeText={setPlantingId} keyboardType="number-pad" /></View>
-              <View style={{ flex: 1 }}><AppInput label="Expense id" value={expenseId} onChangeText={setExpenseId} keyboardType="number-pad" /></View>
-            </View>
             <AppButton title={editingId ? 'Save' : 'Create'} icon="checkmark-circle" onPress={submit} />
             <View style={{ height: 8 }} />
             <AppButton title="Cancel" variant="ghost" onPress={resetForm} />

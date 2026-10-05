@@ -2,14 +2,17 @@
   "expo": {
     "name": "Agro",
     "slug": "agro-cell-phone",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "primaryColor": "#244b3b",
+    "icon": "./assets/adaptive-icon.png",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.agro.cellphone"
     },
     "android": {
       "package": "com.agro.cellphone",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#244b3b"
@@ -24,7 +27,16 @@
       ],
       "expo-asset",
       "expo-sharing",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/adaptive-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#244b3b"
+        }
+      ]
     ]
   }
 }

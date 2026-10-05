@@ -14,7 +14,7 @@ import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
 import { fmt, theme } from '../components/theme';
 import { isGreek, t } from '../lib/i18n';
-import { AppButton, AppInput, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
+import { AppButton, AppInput, AppSelect, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle, type SelectOption } from '../components/ui';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 function useTxn(kind: 'expenses' | 'incomes') {
@@ -35,7 +35,9 @@ function useTxn(kind: 'expenses' | 'incomes') {
   const [includeTax, setIncludeTax] = useState(kind === 'incomes');
   const [isArchived, setIsArchived] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [hint, setHint] = useState('');
+  const [farmOpts, setFarmOpts] = useState<SelectOption[]>([]);
+  const [catOpts, setCatOpts] = useState<SelectOption[]>([]);
+  const [contactOpts, setContactOpts] = useState<SelectOption[]>([]);
 
   const refresh = useCallback(async () => {
     const f: any = {
@@ -53,11 +55,11 @@ function useTxn(kind: 'expenses' | 'incomes') {
       const farms = await listFarms();
       const cats = await listLookups(kind === 'expenses' ? 'expense_categories' : 'income_categories');
       const contacts = kind === 'expenses' ? await listVendors() : await listCustomers();
-      setHint(
-        `farms: ${farms.map((x) => `${x.id}=${x.title}`).join(', ') || 'none'} | categories: ${cats.map((x) => `${x.id}=${x.name}`).join(', ') || 'none'} | contacts: ${contacts.map((x: any) => `${x.id}=${x.name}`).join(', ') || 'none'}`,
-      );
+      setFarmOpts(farms.map((x) => ({ id: x.id, label: x.title, sub: `#${x.id}` })));
+      setCatOpts(cats.map((x) => ({ id: x.id, label: x.name })));
+      setContactOpts(contacts.map((x: any) => ({ id: x.id, label: x.name })));
     } catch {
-      setHint('');
+      // keep previous options
     }
   }, [q, farmId, start, end, doc, tax, showArchived, kind]);
 
@@ -66,7 +68,7 @@ function useTxn(kind: 'expenses' | 'incomes') {
     rows, q, setQ, farmId, setFarmId, start, setStart, end, setEnd, doc, setDoc, tax, setTax,
     showArchived, setShowArchived, title, setTitle, amount, setAmount, categoryId, setCategoryId,
     contactId, setContactId, date, setDate, description, setDescription, includeTax, setIncludeTax,
-    isArchived, setIsArchived, editingId, setEditingId, hint, refresh,
+    isArchived, setIsArchived, editingId, setEditingId, farmOpts, catOpts, contactOpts, refresh,
   };
 }
 
@@ -83,10 +85,10 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
           tone={theme.sage}
         />
       </View>
+      <AppSelect label="Farm" placeholder="All farms" value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} />
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput placeholder="Farm id" value={s.farmId} onChangeText={s.setFarmId} keyboardType="number-pad" /></View>
-        <View style={{ flex: 1 }}><AppInput placeholder="From YYYY-MM-DD" value={s.start} onChangeText={s.setStart} /></View>
-        <View style={{ flex: 1 }}><AppInput placeholder="To YYYY-MM-DD" value={s.end} onChangeText={s.setEnd} /></View>
+        <View style={{ flex: 1 }}><AppInput label="From" placeholder="From YYYY-MM-DD" value={s.start} onChangeText={s.setStart} /></View>
+        <View style={{ flex: 1 }}><AppInput label="To" placeholder="To YYYY-MM-DD" value={s.end} onChangeText={s.setEnd} /></View>
       </View>
       <AppButton title="Apply" variant="secondary" icon="filter" onPress={s.refresh} />
     </Card>
@@ -99,16 +101,27 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
 }) {
   return (
     <View>
-      <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>{s.hint}</Text>
       <AppInput label="Title" value={s.title} onChangeText={s.setTitle} icon="create-outline" />
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}><AppInput label="Amount" value={s.amount} onChangeText={s.setAmount} keyboardType="decimal-pad" icon="cash-outline" /></View>
         <View style={{ flex: 1 }}><AppInput label="Date" value={s.date} onChangeText={s.setDate} icon="calendar-outline" /></View>
       </View>
-      {kind === 'expenses' && <AppInput label="Farm id" value={s.farmId} onChangeText={s.setFarmId} keyboardType="number-pad" />}
+      {kind === 'expenses' && (
+        <AppSelect label="Farm" placeholder="Select farm…" value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} allowClear={false} />
+      )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <View style={{ flex: 1 }}><AppInput label="Category id" value={s.categoryId} onChangeText={s.setCategoryId} keyboardType="number-pad" /></View>
-        <View style={{ flex: 1 }}><AppInput label={kind === 'expenses' ? 'Vendor id' : 'Customer id'} value={s.contactId} onChangeText={s.setContactId} keyboardType="number-pad" /></View>
+        <View style={{ flex: 1 }}>
+          <AppSelect label="Category" placeholder="Select category…" value={s.categoryId || null} options={s.catOpts} onChange={(id) => s.setCategoryId(id == null ? '' : String(id))} allowClear={false} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppSelect
+            label={kind === 'expenses' ? 'Vendor (optional)' : 'Customer (optional)'}
+            placeholder="None"
+            value={s.contactId || null}
+            options={s.contactOpts}
+            onChange={(id) => s.setContactId(id == null ? '' : String(id))}
+          />
+        </View>
       </View>
       <AppInput label="Description" placeholder="Optional" value={s.description} onChangeText={s.setDescription} />
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -119,11 +132,21 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
       {kind === 'incomes' && (
         <View>
           <Text style={{ fontWeight: '800', marginTop: 8, color: theme.ink }}>Farm allocations (optional)</Text>
-          {allocations.map((allocation, index) => <View key={index} style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginVertical: 6, backgroundColor: '#FAFAF6' }}>
-            <AppInput placeholder="Farm id" value={allocation.farm_id} onChangeText={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, farm_id: value } : row))} keyboardType="number-pad" />
-            <AppInput placeholder="Allocated amount" value={allocation.amount} onChangeText={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, amount: value } : row))} keyboardType="decimal-pad" />
-            <AppButton title="Remove" variant="ghost" onPress={() => setAllocations(allocations.filter((_, i) => i !== index))} />
-          </View>)}
+          <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 4 }}>Split income across farms. Total cannot exceed the amount.</Text>
+          {allocations.map((allocation, index) => (
+            <View key={index} style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginVertical: 6, backgroundColor: '#FAFAF6' }}>
+              <AppSelect
+                label="Farm"
+                placeholder="Select farm…"
+                value={allocation.farm_id || null}
+                options={s.farmOpts}
+                onChange={(id) => setAllocations(allocations.map((row, i) => i === index ? { ...row, farm_id: id == null ? '' : String(id) } : row))}
+                allowClear={false}
+              />
+              <AppInput placeholder="Allocated amount" value={allocation.amount} onChangeText={(value) => setAllocations(allocations.map((row, i) => i === index ? { ...row, amount: value } : row))} keyboardType="decimal-pad" />
+              <AppButton title="Remove" variant="ghost" onPress={() => setAllocations(allocations.filter((_, i) => i !== index))} />
+            </View>
+          ))}
           <AppButton title="Add allocation" variant="secondary" icon="add" onPress={() => setAllocations([...allocations, { farm_id: '', amount: '' }])} />
         </View>
       )}
@@ -142,6 +165,7 @@ function TxnRow({ r, kind, onEdit, onArchive, onDelete }: { r: any; kind: 'expen
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 14.5, fontWeight: '800', color: theme.ink }}>{r.title}</Text>
           <Text style={{ fontSize: 12.5, color: theme.muted }}>{kind === 'expenses' ? r.farm_title : r.farm_summary || t('unallocated')} · {r.date}</Text>
+          <Text style={{ fontSize: 12, color: theme.muted }}>{r.category_name}{r.contact_name ? ` · ${r.contact_name}` : ''}</Text>
         </View>
         <Text style={{ fontWeight: '800', color: isOut ? theme.danger : theme.success }}>{isOut ? '−' : '+'}{fmt(r.amount)}</Text>
       </View>
@@ -170,6 +194,7 @@ export function ExpensesScreen() {
 
   const submit = async () => {
     try {
+      if (!s.farmId || !s.categoryId) throw new Error('Pick a farm and a category first.');
       const payload = {
         farm_id: Number(s.farmId), category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,
@@ -234,6 +259,7 @@ export function IncomesScreen() {
 
   const submit = async () => {
     try {
+      if (!s.categoryId) throw new Error('Pick a category first.');
       const payload = {
         category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,

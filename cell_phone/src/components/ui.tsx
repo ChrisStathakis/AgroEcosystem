@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -364,6 +364,83 @@ const segStyles = StyleSheet.create({
   text: { fontSize: 12.5, fontWeight: '700', color: theme.muted },
   activeText: { color: theme.pine },
 });
+
+// ---------- Select (pure-JS dropdown, port of web <select> fields) ----------
+export interface SelectOption {
+  id: number | string;
+  label: string;
+  sub?: string;
+}
+
+export function AppSelect({
+  label,
+  placeholder = 'Select…',
+  value,
+  options,
+  onChange,
+  allowClear = true,
+}: {
+  label?: string;
+  placeholder?: string;
+  value: number | string | null | undefined;
+  options: SelectOption[];
+  onChange: (id: number | string | null, option?: SelectOption) => void;
+  allowClear?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const selected = useMemo(() => options.find((o) => String(o.id) === String(value ?? '')), [options, value]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return options;
+    return options.filter((o) => `${o.label} ${o.sub ?? ''}`.toLowerCase().includes(needle));
+  }, [options, q]);
+  return (
+    <View style={{ marginBottom: 10 }}>
+      {label ? <Text style={inputStyles.label}>{label}</Text> : null}
+      <Pressable onPress={() => { setQ(''); setOpen(true); }} style={inputStyles.box}>
+        <Ionicons name="chevron-down" size={17} color={theme.muted} />
+        <Text style={[inputStyles.field, !selected && { color: theme.faint }]} numberOfLines={1}>
+          {selected ? selected.label : placeholder}
+        </Text>
+        {selected && allowClear ? (
+          <Pressable onPress={() => onChange(null)}>
+            <Ionicons name="close-circle" size={17} color={theme.faint} />
+          </Pressable>
+        ) : null}
+      </Pressable>
+      <Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 48, paddingHorizontal: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: theme.ink }}>{label ?? placeholder}</Text>
+            <Pressable onPress={() => setOpen(false)} style={{ padding: 8 }}>
+              <Ionicons name="close" size={22} color={theme.ink} />
+            </Pressable>
+          </View>
+          <SearchBar value={q} onChange={setQ} placeholder="Search…" />
+          <FlatList
+            data={allowClear ? [{ id: '__clear__', label: '— Clear selection —' } as SelectOption, ...filtered] : filtered}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => {
+                  setOpen(false);
+                  if (String(item.id) === '__clear__') onChange(null);
+                  else onChange(item.id, item);
+                }}
+                style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 13, marginBottom: 8 }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '700', color: theme.ink }}>{item.label}</Text>
+                {item.sub ? <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{item.sub}</Text> : null}
+              </Pressable>
+            )}
+            ListEmptyComponent={<EmptyState icon="search-outline" title="No matches" hint="Try a different search." />}
+          />
+        </View>
+      </Modal>
+    </View>
+  );
+}
 
 // ---------- FAB ----------
 export function FAB({ icon = 'add', onPress, label }: { icon?: keyof typeof Ionicons.glyphMap; onPress: () => void; label?: string }) {

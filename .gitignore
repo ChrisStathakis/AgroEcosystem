@@ -12,6 +12,15 @@ node_modules/
 .expo/
 dist/
 expo-env.d.ts
+# desktop/electron
+desktop/dist/
+desktop/node_modules/
+server/dist/
+server/staticfiles/
+# build outputs
+server/build/
+*.apk
+*.aab
 
 # backups/logs/os
 *.bak52
