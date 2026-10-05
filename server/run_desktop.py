@@ -5,7 +5,11 @@ Used by Electron (dev: `python run_desktop.py`, prod: PyInstaller exe).
 Writes the chosen port to --port-file so Electron can load it.
 
 Usage:
-    python run_desktop.py [--port 8000] [--port-file FILE] [--host 127.0.0.1]
+    python run_desktop.py [--port 8517] [--port-file FILE] [--host 127.0.0.1]
+
+--port is a *preferred* port: when busy we fall back to a free one. Keeping the
+port stable keeps the origin (http://127.0.0.1:8517) stable, which is what makes
+the renderer's localStorage survive restarts (theme choice, see desktop/main.js).
 """
 import argparse
 import os
@@ -36,10 +40,22 @@ def find_free_port(host="127.0.0.1"):
         return s.getsockname()[1]
 
 
+def find_port(host="127.0.0.1", preferred=0):
+    """Return `preferred` if bindable, else an OS-assigned free port."""
+    if preferred:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, preferred))
+                return preferred
+        except OSError:
+            print(f"[agro] port {preferred} busy, using a free port instead", flush=True)
+    return find_free_port(host)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--port", type=int, default=8517)
     parser.add_argument("--port-file", default=None)
     args = parser.parse_args()
 
@@ -70,7 +86,7 @@ def main():
         print(f"[agro] collectstatic skipped: {exc}", flush=True)
 
     host = args.host
-    port = args.port or find_free_port(host)
+    port = find_port(host, args.port)
 
     if args.port_file:
         Path(args.port_file).write_text(str(port), encoding="utf-8")

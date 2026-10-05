@@ -3,21 +3,21 @@ import { Alert, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   availableYears, cashFlowReport, categoryBreakdown, describeFilters, farmProfit, financialSummary,
-  profitLossReport, taxReport,
+  obligationsReport, profitLossReport, taxReport,
 } from '../db/repositories/analytics';
 import { listFarms } from '../db/repositories/farms';
 import { listLookups } from '../db/repositories/lookups';
 import { listCustomers, listVendors } from '../db/repositories/contacts';
-import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary, MonthlyRow } from '../db/types';
-import { MonthlyChart, Stats } from '../components/panels';
+import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary, MonthlyRow, ObligationsReport } from '../db/types';
+import { CumulativeBars, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
-import { fmt, theme } from '../components/theme';
-import { cashFlowToCSV, exportReportAndShare, overviewToCSV, profitLossToCSV, taxToCSV } from '../lib/csv';
+import { fmt, useColors } from '../components/theme';
+import { cashFlowToCSV, exportReportAndShare, obligationsToCSV, overviewToCSV, profitLossToCSV, taxToCSV } from '../lib/csv';
 import { localizeCategoryName, localizeFarmName, localizeMonthLabel, t } from '../lib/i18n';
 import { AppButton, AppInput, AppSelect, Badge, Card, EmptyState, RowCard, SegmentedTabs, SectionTitle, Skeleton, type SelectOption } from '../components/ui';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
-type Tab = 'overview' | 'pl' | 'cf' | 'tax';
+type Tab = 'overview' | 'pl' | 'cf' | 'tax' | 'obligations';
 type DocFilter = '' | 'invoice' | 'receipt';
 type TaxFilter = 'all' | 'taxed' | 'untaxed';
 
@@ -30,12 +30,14 @@ interface FilterOptions {
 }
 
 export function AnalyticsScreen() {
+  const theme = useColors();
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [farms, setFarms] = useState<FarmProfitRow[]>([]);
   const [cats, setCats] = useState<{ expenses: CategoryTotal[]; incomes: CategoryTotal[] } | null>(null);
-  const [cf, setCf] = useState<{ rows: CashFlowRow[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
+  const [cf, setCf] = useState<{ rows: CashFlowRow[]; labels: string[]; cumulative: number[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
   const [pl, setPl] = useState<{ monthly: MonthlyRow[]; farms: FarmProfitRow[]; income_categories: CategoryTotal[]; expense_categories: CategoryTotal[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
   const [tax, setTax] = useState<{ incomes: any[]; expenses: any[]; income_total: number; expense_total: number; net: number; period_label: string } | null>(null);
+  const [obl, setObl] = useState<ObligationsReport | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [start, setStart] = useState('');
@@ -90,6 +92,7 @@ export function AnalyticsScreen() {
     setCf(await cashFlowReport(f) as any);
     setPl(await profitLossReport(f) as any);
     setTax(await taxReport(f) as any);
+    setObl(await obligationsReport(f));
     setYears(await availableYears());
     setDesc(describeFilters(f, s.period_label));
   }, [filters]);
@@ -115,6 +118,9 @@ export function AnalyticsScreen() {
       } else if (tab === 'cf') {
         const cfR = cf ?? await cashFlowReport(f);
         await exportReportAndShare(`analytics-cf-${cfR.period_label}`, cashFlowToCSV(cfR as any));
+      } else if (tab === 'obligations') {
+        const report = obl ?? await obligationsReport(f);
+        await exportReportAndShare(`analytics-obligations-${report.period_label}`, obligationsToCSV(report));
       } else {
         const tx = tax ?? await taxReport(f);
         await exportReportAndShare(`analytics-tax-${tx.period_label}`, taxToCSV(tx as any));
@@ -194,6 +200,7 @@ export function AnalyticsScreen() {
               { id: 'pl', label: 'P&L' },
               { id: 'cf', label: 'Cash' },
               { id: 'tax', label: 'Tax' },
+              { id: 'obligations', label: t('obligations') },
             ]}
           />
         </View>
@@ -225,7 +232,7 @@ export function AnalyticsScreen() {
                   <Text style={{ fontWeight: '800', color: theme.ink }}>{localizeFarmName(farm.farm)}</Text>
                   <Badge label={fmt(farm.net)} tone={farm.net < 0 ? 'red' : 'green'} />
                 </View>
-                <View style={{ height: 8, borderRadius: 5, backgroundColor: '#EFF1EA', marginTop: 8, overflow: 'hidden' }}>
+                <View style={{ height: 8, borderRadius: 5, backgroundColor: theme.neutralSoft, marginTop: 8, overflow: 'hidden' }}>
                   <View style={{ height: 8, borderRadius: 5, width: `${Math.max(4, (Math.abs(farm.net) / maxFarm) * 100)}%`, backgroundColor: farm.net < 0 ? theme.danger : theme.pine }} />
                 </View>
                 <Text style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>in {fmt(farm.income)} · out {fmt(farm.expense)}</Text>
@@ -267,14 +274,18 @@ export function AnalyticsScreen() {
           </View>
         )}
         {tab === 'cf' && (
-          <Card>
-            <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Cash flow (running balance)</Text>
-            {(cf?.rows ?? []).map((r) => (
-              <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} />
-            ))}
-            {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>No cash movement for these filters.</Text>}
-            <Row label={`Total ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
-          </Card>
+          <View>
+            <Card>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Cash flow (running balance)</Text>
+              {(cf?.rows ?? []).map((r) => (
+                <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} />
+              ))}
+              {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>No cash movement for these filters.</Text>}
+              <Row label={`Total ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
+            </Card>
+            <View style={{ height: 10 }} />
+            <CumulativeBars labels={(cf?.labels ?? []).map(localizeMonthLabel)} totals={cf?.cumulative ?? []} />
+          </View>
         )}
         {tab === 'tax' && (
           <Card>
@@ -287,6 +298,47 @@ export function AnalyticsScreen() {
             <Row label="Taxable net" value={fmt(tax?.net ?? 0)} bold />
           </Card>
         )}
+        {tab === 'obligations' && (
+          <View>
+            <SectionTitle title={`${t('obligations')} · ${obl?.period_label ?? summary.period_label}`} />
+            <Card>
+              <Row label={t('unpaid_total')} value={fmt(obl?.unpaid_total ?? 0)} />
+              <Row label={t('overdue')} value={fmt(obl?.overdue_total ?? 0)} />
+              <Row label={t('open_items')} value={String(obl?.count ?? 0)} bold />
+              <Text style={{ color: theme.muted, fontSize: 12, marginTop: 6 }}>{t('obligations_hint')}</Text>
+            </Card>
+            <View style={{ height: 10 }} />
+            <SectionTitle title={t('per_farm')} />
+            <Card>
+              <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 6 }}>{t('shared_split_hint')}</Text>
+              {(obl?.farms ?? []).map((r) => (
+                <Row key={r.farm} label={localizeFarmName(r.farm)} value={`${fmt(r.unpaid)} · ${t('overdue')} ${fmt(r.overdue)}`} />
+              ))}
+              {(obl?.farms ?? []).length === 0 && <Text style={{ color: theme.muted }}>{t('obligations_empty')}</Text>}
+            </Card>
+            <View style={{ height: 10 }} />
+            <SectionTitle title={`${t('unpaid')} (${obl?.count ?? 0})`} />
+            {(obl?.items ?? []).length === 0 && <EmptyState icon="wallet-outline" title={t('obligations_empty')} hint={t('obligations_hint')} />}
+            {(obl?.items ?? []).map((e) => (
+              <RowCard key={e.id}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '800', color: theme.ink }}>{e.title}</Text>
+                    <Text style={{ fontSize: 12, color: theme.muted }}>
+                      {e.farm_title ?? t('all_farms_split')} · {e.date} · {e.category_name}
+                    </Text>
+                  </View>
+                  <Text style={{ fontWeight: '800', color: theme.danger }}>−{fmt(e.amount)}</Text>
+                </View>
+                {e.is_overdue ? (
+                  <View style={{ marginTop: 6 }}>
+                    <Badge label={t('overdue')} tone="red" />
+                  </View>
+                ) : null}
+              </RowCard>
+            ))}
+          </View>
+        )}
         <View style={{ height: 12 }} />
         <AppButton title="Export current view (CSV)" icon="share-outline" variant="secondary" onPress={exportCurrent} />
       </Screen>
@@ -296,6 +348,7 @@ export function AnalyticsScreen() {
 }
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  const theme = useColors();
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, gap: 10 }}>
       <Text style={{ color: theme.muted, fontSize: 13.5, flex: 1 }}>{label}</Text>

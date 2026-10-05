@@ -5,7 +5,7 @@ import { createLookup, type LookupTable } from '../db/repositories/lookups';
 import { createContact } from '../db/repositories/contacts';
 import { AppButton, AppInput, Card } from './ui';
 import { t } from '../lib/i18n';
-import { theme } from './theme';
+import { useColors } from './theme';
 
 export type QuickAddKind =
   | { type: 'farm' }
@@ -30,6 +30,7 @@ export function QuickAdd({
   const [name, setName] = useState('');
   const [size, setSize] = useState('');
   const [busy, setBusy] = useState(false);
+  const theme = useColors();
 
   if (!kind) return null;
   const title =

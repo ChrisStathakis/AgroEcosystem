@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 
 const TABS: { route: string; label: string; icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap }[] = [
   { route: 'Overview', label: 'Home', icon: 'home-outline', activeIcon: 'home' },
@@ -19,6 +19,8 @@ const PRIMARY = new Set(['Overview', 'Farms', 'Tasks', 'Expenses', 'Incomes', 'A
 export function FloatingTabBar() {
   const navigation = useNavigation<any>();
   const route = useRoute();
+  const theme = useColors();
+  const styles = useTabStyles();
   if (!PRIMARY.has(route.name)) return null;
   const active = route.name === 'Incomes' ? 'Expenses' : route.name;
   return (
@@ -56,23 +58,30 @@ export function FloatingTabBar() {
   );
 }
 
-const styles = StyleSheet.create({
-  absolute: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingBottom: 18, paddingHorizontal: 16 },
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 26,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    gap: 2,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: '#FFFFFFE8',
-    ...theme.shadow,
-  },
-  tab: { alignItems: 'center', justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 11, borderRadius: 18, minWidth: 52 },
-  tabActive: { backgroundColor: theme.pine },
-  label: { fontSize: 10, fontWeight: '700', color: theme.muted, marginTop: 2 },
-  labelActive: { color: '#fff' },
-});
+function useTabStyles() {
+  const theme = useColors();
+  return React.useMemo(
+    () =>
+      StyleSheet.create({
+        absolute: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingBottom: 18, paddingHorizontal: 16 },
+        bar: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          borderRadius: 26,
+          paddingHorizontal: 8,
+          paddingVertical: 8,
+          gap: 2,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: theme.card,
+          ...theme.shadow,
+        },
+        tab: { alignItems: 'center', justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 11, borderRadius: 18, minWidth: 52 },
+        tabActive: { backgroundColor: theme.pine },
+        label: { fontSize: 10, fontWeight: '700', color: theme.muted, marginTop: 2 },
+        labelActive: { color: '#fff' },
+      }),
+    [theme],
+  );
+}

@@ -69,13 +69,14 @@ export async function createTask(input: {
     assertSameFarm(input.farm_id, p.farm_id, 'Tree group');
   }
   if (input.expense_id) {
-    const e = await db.getFirstAsync<{ farm_id: number; is_archived: number }>(
+    const e = await db.getFirstAsync<{ farm_id: number | null; is_archived: number }>(
       'SELECT farm_id, is_archived FROM expenses WHERE id = ?',
       [input.expense_id],
     );
     if (!e) throw new Error('Selected expense no longer exists.');
     if (e.is_archived) throw new Error('Archived expenses cannot be linked to new tasks.');
-    assertSameFarm(input.farm_id, e.farm_id, 'Expense');
+    // Shared (farm-less) expenses may attach to any farm (server FarmTaskForm.clean).
+    if (e.farm_id != null) assertSameFarm(input.farm_id, e.farm_id, 'Expense');
   }
   const now = nowISO();
   const res = await db.runAsync(
@@ -106,7 +107,7 @@ export async function updateTask(
       'SELECT expense_id FROM farm_tasks WHERE id = ? AND profile_id = ?',
       [id, SINGLE_PROFILE_ID],
     );
-    const e = await db.getFirstAsync<{ farm_id: number; is_archived: number }>(
+    const e = await db.getFirstAsync<{ farm_id: number | null; is_archived: number }>(
       'SELECT farm_id, is_archived FROM expenses WHERE id = ?',
       [input.expense_id],
     );
@@ -115,7 +116,7 @@ export async function updateTask(
     if (e.is_archived && current?.expense_id !== input.expense_id) {
       throw new Error('Archived expenses cannot be linked to tasks. Unarchive it first.');
     }
-    assertSameFarm(input.farm_id, e.farm_id, 'Expense');
+    if (e.farm_id != null) assertSameFarm(input.farm_id, e.farm_id, 'Expense');
   }
   await db.runAsync(
     `UPDATE farm_tasks SET farm_id = ?, planting_id = ?, category_id = ?, expense_id = ?, title = ?, description = ?, date = ?, updated_at = ?
@@ -132,7 +133,8 @@ export async function listTaskExpenseOptions(farmId?: number, includeExpenseId?:
   const params: SQLiteBindValue[] = [SINGLE_PROFILE_ID];
   if (includeExpenseId) params.push(includeExpenseId);
   if (farmId) {
-    sql += ' AND e.farm_id = ?';
+    // Shared (farm-less) expenses are linkable to every farm (server forms.py).
+    sql += ' AND (e.farm_id = ? OR e.farm_id IS NULL)';
     params.push(farmId);
   }
   sql += ' ORDER BY e.date DESC, e.id DESC LIMIT 200';

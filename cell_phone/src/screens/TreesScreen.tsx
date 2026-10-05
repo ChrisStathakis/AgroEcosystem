@@ -9,7 +9,7 @@ import { todayISODate } from '../db/types';
 import { Screen } from './Screen';
 import { t } from '../lib/i18n';
 import { AppButton, AppInput, AppSelect, Badge, Card, EmptyState, RowCard, SearchBar, SectionTitle, type SelectOption } from '../components/ui';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 
 export function TreesScreen() {
   const [rows, setRows] = useState<TreePlanting[]>([]);
@@ -25,6 +25,7 @@ export function TreesScreen() {
   const [farmOpts, setFarmOpts] = useState<SelectOption[]>([]);
   const [typeOpts, setTypeOpts] = useState<SelectOption[]>([]);
   const [plantingOpts, setPlantingOpts] = useState<SelectOption[]>([]);
+  const theme = useColors();
 
   const refresh = useCallback(async () => {
     setRows(await listPlantings(farmId ? Number(farmId) : undefined, q));

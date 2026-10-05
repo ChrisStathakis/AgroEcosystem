@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from './theme';
+import { useColors } from './theme';
 import { SearchBar } from './ui';
 
 export interface SelectOption {
@@ -27,6 +27,8 @@ interface SelectProps {
 export function Select({ label, placeholder, value, options, onChange, allowClear = true, disabled = false }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const theme = useColors();
+  const styles = useSelectStyles();
 
   const selected = useMemo(() => options.find((o) => o.id === value) ?? null, [options, value]);
   const filtered = useMemo(() => {
@@ -95,10 +97,10 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
                   style={[styles.row, active && styles.rowActive]}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowLabel, active && { color: theme.pine }]}>{item.label}</Text>
+                    <Text style={[styles.rowLabel, active && { color: theme.green }]}>{item.label}</Text>
                     {item.sub ? <Text style={styles.rowSub}>{item.sub}</Text> : null}
                   </View>
-                  {active ? <Ionicons name="checkmark-circle" size={19} color={theme.pine} /> : null}
+                  {active ? <Ionicons name="checkmark-circle" size={19} color={theme.green} /> : null}
                 </Pressable>
               );
             }}
@@ -109,30 +111,37 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
   );
 }
 
-const styles = StyleSheet.create({
-  label: { fontSize: 12, fontWeight: '700', color: theme.inkSoft, marginBottom: 6, letterSpacing: 0.2 },
-  field: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: theme.borderStrong,
-    borderRadius: theme.radiusSm,
-    paddingHorizontal: 13,
-    minHeight: 48,
-  },
-  fieldText: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 12 },
-  sheet: { flex: 1, backgroundColor: theme.bg, padding: 16, paddingTop: 48 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  title: { fontSize: 17, fontWeight: '800', color: theme.ink },
-  close: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#fff', borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center' },
-  clearRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 4, marginBottom: 4 },
-  clearText: { fontSize: 13.5, fontWeight: '700', color: theme.muted },
-  empty: { fontSize: 13, color: theme.muted, textAlign: 'center', marginTop: 24, paddingHorizontal: 24 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: theme.border, borderRadius: theme.radiusSm, padding: 13, marginBottom: 8 },
-  rowActive: { borderColor: theme.pine, borderWidth: 1.5 },
-  rowLabel: { fontSize: 14.5, fontWeight: '800', color: theme.ink },
-  rowSub: { fontSize: 12.5, color: theme.muted, marginTop: 2 },
-});
+function useSelectStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        label: { fontSize: 12, fontWeight: '700', color: theme.inkSoft, marginBottom: 6, letterSpacing: 0.2 },
+        field: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          backgroundColor: theme.surface,
+          borderWidth: 1.5,
+          borderColor: theme.borderStrong,
+          borderRadius: theme.radiusSm,
+          paddingHorizontal: 13,
+          minHeight: 48,
+        },
+        fieldText: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 12 },
+        sheet: { flex: 1, backgroundColor: theme.bg, padding: 16, paddingTop: 48 },
+        header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+        title: { fontSize: 17, fontWeight: '800', color: theme.ink },
+        close: { width: 38, height: 38, borderRadius: 19, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center' },
+        clearRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 4, marginBottom: 4 },
+        clearText: { fontSize: 13.5, fontWeight: '700', color: theme.muted },
+        empty: { fontSize: 13, color: theme.muted, textAlign: 'center', marginTop: 24, paddingHorizontal: 24 },
+        row: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: theme.radiusSm, padding: 13, marginBottom: 8 },
+        rowActive: { borderColor: theme.green, borderWidth: 1.5 },
+        rowLabel: { fontSize: 14.5, fontWeight: '800', color: theme.ink },
+        rowSub: { fontSize: 12.5, color: theme.muted, marginTop: 2 },
+      }),
+    [theme],
+  );
+}

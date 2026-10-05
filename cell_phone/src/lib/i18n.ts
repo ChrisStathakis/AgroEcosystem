@@ -134,6 +134,28 @@ const STRINGS: Record<string, { en: string; el: string }> = {
   top_categories: { en: 'Top categories', el: 'Κορυφαίες κατηγορίες' },
   no_data_filters: { en: 'No records match these filters.', el: 'Δεν υπάρχουν εγγραφές για αυτά τα φίλτρα.' },
   quick_add_hint: { en: 'You stay on the same form; the new item is selected automatically.', el: 'Παραμένετε στην ίδια φόρμα· το νέο στοιχείο επιλέγεται αυτόματα.' },
+  // Payment status (server 0006) + shared expenses (server 0005)
+  paid: { en: 'Paid', el: 'Πληρωμένο' },
+  unpaid: { en: 'Unpaid', el: 'Απλήρωτο' },
+  paid_only: { en: 'Paid only', el: 'Μόνο πληρωμένα' },
+  unpaid_only: { en: 'Unpaid only', el: 'Μόνο απλήρωτα' },
+  all_farms_split: { en: 'All farms (split)', el: 'Όλες οι φάρμες (επιμερισμός)' },
+  farm_split_placeholder: { en: 'All farms — split by trees', el: 'Όλες οι φάρμες — επιμερισμός με δέντρα' },
+  // Obligations report (server analytics_obligations)
+  obligations: { en: 'Obligations', el: 'Υποχρεώσεις' },
+  unpaid_total: { en: 'Unpaid total', el: 'Σύνολο απλήρωτων' },
+  overdue: { en: 'Overdue', el: 'Ληξιπρόθεσμα' },
+  open_items: { en: 'Open items', el: 'Ανοιχτά' },
+  per_farm: { en: 'Per farm', el: 'Ανά φάρμα' },
+  shared_split_hint: { en: 'Shared expenses split by tree count', el: 'Τα κοινά έξοδα επιμερίζονται με βάση τα δέντρα' },
+  obligations_hint: { en: 'Control this with the “Paid” flag on each expense. Overdue means dated before today.', el: 'Ελέγξτε το με το πεδίο «Πληρωμένο» σε κάθε έξοδο. Ληξιπρόθεσμο σημαίνει με ημερομηνία πριν από σήμερα.' },
+  obligations_empty: { en: 'No unpaid expenses match these filters.', el: 'Καμία απλήρωτη εγγραφή δεν ταιριάζει με αυτά τα φίλτρα.' },
+  // Appearance (theme preference, Settings screen)
+  appearance: { en: 'Appearance', el: 'Εμφάνιση' },
+  appearance_hint: { en: 'Follow the phone setting, or lock the app to light or dark.', el: 'Ακολούθησε τη ρύθμιση του τηλεφώνου ή κλείδωσε την εφαρμογή σε ανοιχτό ή σκοτεινό.' },
+  theme_light: { en: 'Light', el: 'Φωτεινό' },
+  theme_dark: { en: 'Dark', el: 'Σκοτεινό' },
+  theme_system: { en: 'System', el: 'Σύστημα' },
 };
 
 export function t(key: keyof typeof STRINGS | string): string {

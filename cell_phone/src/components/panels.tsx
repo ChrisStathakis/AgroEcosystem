@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { fmt, fmtCompact, theme } from './theme';
+import { fmt, fmtCompact, useColors } from './theme';
 import { Card } from './ui';
 
 function useCountUp(target: number, duration = 700) {
@@ -28,6 +28,8 @@ function useCountUp(target: number, duration = 700) {
 }
 
 function StatCard({ label, value, icon, tint, bg, delay }: { label: string; value: number; icon: keyof typeof Ionicons.glyphMap; tint: string; bg: string; delay: number }) {
+  const theme = useColors();
+  const styles = useStatStyles();
   const scale = useSharedValue(0.9);
   const opacity = useSharedValue(0);
   useEffect(() => {
@@ -39,7 +41,7 @@ function StatCard({ label, value, icon, tint, bg, delay }: { label: string; valu
   return (
     <Animated.View style={[{ flex: 1 }, aStyle]}>
       <View style={[styles.stat, { backgroundColor: bg }]}>
-        <View style={[styles.iconBubble, { backgroundColor: '#ffffffAA' }]}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.surface }]}>
           <Ionicons name={icon} size={16} color={tint} />
         </View>
         <Text style={styles.statLabel}>{label}</Text>
@@ -49,17 +51,60 @@ function StatCard({ label, value, icon, tint, bg, delay }: { label: string; valu
   );
 }
 
+function useStatStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        row: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+        stat: { borderRadius: 18, padding: 12, borderWidth: 1, borderColor: '#FFFFFF88', minHeight: 118, justifyContent: 'space-between' },
+        iconBubble: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+        statLabel: { fontSize: 11.5, fontWeight: '700', color: theme.inkSoft },
+        statValue: { fontSize: 16.5, fontWeight: '800', letterSpacing: -0.3 },
+      }),
+    [theme],
+  );
+}
+
 export function Stats({ income, expense, balance }: { income: number; expense: number; balance: number }) {
+  const theme = useColors();
+  const styles = useStatStyles();
   return (
     <View style={styles.row}>
-      <StatCard label="Income" value={income} icon="trending-up" tint={theme.pine} bg="#E3EFE2" delay={0} />
-      <StatCard label="Expenses" value={expense} icon="trending-down" tint="#8A5E12" bg="#F7E8C8" delay={90} />
-      <StatCard label="Balance" value={balance} icon="wallet" tint={balance < 0 ? theme.danger : theme.pine} bg={balance < 0 ? theme.dangerSoft : '#DDE9D9'} delay={180} />
+      <StatCard label="Income" value={income} icon="trending-up" tint={theme.success} bg={theme.successSoft} delay={0} />
+      <StatCard label="Expenses" value={expense} icon="trending-down" tint={theme.accentText} bg={theme.accentSoft} delay={90} />
+      <StatCard
+        label="Balance"
+        value={balance}
+        icon="wallet"
+        tint={balance < 0 ? theme.danger : theme.success}
+        bg={balance < 0 ? theme.dangerSoft : theme.sage}
+        delay={180}
+      />
     </View>
   );
 }
 
+function useHeroStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        wrap: { borderRadius: 22, overflow: 'hidden', marginBottom: 14, ...theme.shadow },
+        gradient: { padding: 18, borderRadius: 22 },
+        topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+        eyebrow: { fontSize: 11, letterSpacing: 1.4, fontWeight: '700', color: '#A8C686' },
+        balance: { fontSize: 34, fontWeight: '800', color: '#fff', letterSpacing: -0.8 },
+        subRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+        pill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ffffff22', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+        pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+      }),
+    [theme],
+  );
+}
+
 export function HeroBalance({ balance, income, expense }: { balance: number; income: number; expense: number }) {
+  const heroStyles = useHeroStyles();
   return (
     <View style={heroStyles.wrap}>
       <LinearGradient colors={['#1E4D3A', '#2E6B4F']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={heroStyles.gradient}>
@@ -84,6 +129,7 @@ export function HeroBalance({ balance, income, expense }: { balance: number; inc
 }
 
 export function MiniBars({ items, format }: { items: Array<{ label: string; value: number; tone?: 'green' | 'red' | 'neutral' }>; format?: (n: number) => string }) {
+  const theme = useColors();
   const max = Math.max(1, ...items.map((x) => Math.abs(x.value)));
   const fmtFn = format ?? fmt;
   return (
@@ -94,7 +140,7 @@ export function MiniBars({ items, format }: { items: Array<{ label: string; valu
             <Text style={{ fontWeight: '700', color: theme.ink, fontSize: 13, flex: 1 }} numberOfLines={1}>{item.label}</Text>
             <Text style={{ fontWeight: '800', color: item.tone === 'red' ? theme.danger : theme.ink, fontSize: 13 }}>{fmtFn(item.value)}</Text>
           </View>
-          <View style={{ height: 8, borderRadius: 5, backgroundColor: '#EFF1EA', marginTop: 5, overflow: 'hidden' }}>
+          <View style={{ height: 8, borderRadius: 5, backgroundColor: theme.neutralSoft, marginTop: 5, overflow: 'hidden' }}>
             <View
               style={{
                 height: 8,
@@ -110,7 +156,29 @@ export function MiniBars({ items, format }: { items: Array<{ label: string; valu
   );
 }
 
+function useChartStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+        title: { fontSize: 15, fontWeight: '800', color: theme.ink },
+        legend: { flexDirection: 'row', gap: 10 },
+        dotRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+        dot: { width: 9, height: 9, borderRadius: 5 },
+        legendText: { fontSize: 11, color: theme.muted, fontWeight: '700' },
+        chart: { flexDirection: 'row' },
+        col: { flex: 1, alignItems: 'center' },
+        bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 100 },
+        bar: { width: 7, borderRadius: 4 },
+        month: { fontSize: 9.5, color: theme.muted, marginTop: 6, fontWeight: '600' },
+      }),
+    [theme],
+  );
+}
+
 export function CategoryBars({ title, items }: { title: string; items: Array<{ label: string; total: number }> }) {
+  const chartStyles = useChartStyles();
   if (items.length === 0) return null;
   return (
     <Card>
@@ -122,6 +190,7 @@ export function CategoryBars({ title, items }: { title: string; items: Array<{ l
 }
 
 export function FarmProfitBars({ rows }: { rows: Array<{ farm: string; net: number }> }) {
+  const chartStyles = useChartStyles();
   if (rows.length === 0) return null;
   return (
     <Card>
@@ -133,6 +202,8 @@ export function FarmProfitBars({ rows }: { rows: Array<{ farm: string; net: numb
 }
 
 export function CumulativeBars({ labels, totals }: { labels: string[]; totals: number[] }) {
+  const theme = useColors();
+  const chartStyles = useChartStyles();
   if (labels.length === 0) return null;
   const min = Math.min(0, ...totals);
   const max = Math.max(1, ...totals.map((x) => x - min));
@@ -160,6 +231,8 @@ export function CumulativeBars({ labels, totals }: { labels: string[]; totals: n
 }
 
 export function MonthlyChart({ monthly }: { monthly: { label: string; income: number; expense: number }[] }) {
+  const theme = useColors();
+  const chartStyles = useChartStyles();
   const max = Math.max(1, ...monthly.map((m) => Math.max(m.income, m.expense)));
   return (
     <Card>
@@ -186,6 +259,8 @@ export function MonthlyChart({ monthly }: { monthly: { label: string; income: nu
 }
 
 function BarPair({ income, expense, max, label, index }: { income: number; expense: number; max: number; label: string; index: number }) {
+  const theme = useColors();
+  const chartStyles = useChartStyles();
   const h1 = useSharedValue(2);
   const h2 = useSharedValue(2);
   useEffect(() => {
@@ -204,36 +279,3 @@ function BarPair({ income, expense, max, label, index }: { income: number; expen
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  stat: { borderRadius: 18, padding: 12, borderWidth: 1, borderColor: '#ffffff88', minHeight: 118, justifyContent: 'space-between' },
-  iconBubble: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  statLabel: { fontSize: 11.5, fontWeight: '700', color: '#3D5248' },
-  statValue: { fontSize: 16.5, fontWeight: '800', letterSpacing: -0.3 },
-});
-
-const heroStyles = StyleSheet.create({
-  wrap: { borderRadius: 22, overflow: 'hidden', marginBottom: 14, ...theme.shadow },
-  gradient: { padding: 18, borderRadius: 22 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  eyebrow: { fontSize: 11, letterSpacing: 1.4, fontWeight: '700', color: '#A8C686' },
-  balance: { fontSize: 34, fontWeight: '800', color: '#fff', letterSpacing: -0.8 },
-  subRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ffffff22', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-});
-
-const chartStyles = StyleSheet.create({
-  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  title: { fontSize: 15, fontWeight: '800', color: theme.ink },
-  legend: { flexDirection: 'row', gap: 10 },
-  dotRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  dot: { width: 9, height: 9, borderRadius: 5 },
-  legendText: { fontSize: 11, color: theme.muted, fontWeight: '700' },
-  chart: { flexDirection: 'row' },
-  col: { flex: 1, alignItems: 'center' },
-  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 100 },
-  bar: { width: 7, borderRadius: 4 },
-  month: { fontSize: 9.5, color: theme.muted, marginTop: 6, fontWeight: '600' },
-});

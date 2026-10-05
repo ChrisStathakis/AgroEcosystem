@@ -75,7 +75,8 @@ export type DocumentType = 'invoice' | 'receipt';
 export interface Expense {
   id: number;
   profile_id: number;
-  farm_id: number;
+  /** null = shared expense, split across farms by tree count (server 0005). */
+  farm_id: number | null;
   category_id: number;
   vendor_id: number | null;
   title: string;
@@ -84,10 +85,11 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   document_type: DocumentType;
   include_in_tax: number;
+  is_paid: number; // 0/1 — unpaid rows feed the obligations report (server 0006)
   is_archived: number; // 0/1 — archived stays in lists/reports, hidden from task dropdowns
   created_at: string;
   updated_at: string;
-  farm_title?: string;
+  farm_title?: string | null;
   category_name?: string;
   contact_name?: string | null;
 }
@@ -191,6 +193,25 @@ export interface FarmProfitRow {
   income: number;
   expense: number;
   net: number;
+}
+
+/** Port of analytics.services.obligations_report: unpaid expenses + per-farm split. */
+export interface ObligationsFarmRow {
+  farm: string;
+  unpaid: number;
+  overdue: number;
+}
+
+export interface ObligationsReport {
+  period_label: string;
+  start: string;
+  end: string;
+  year: number | null;
+  items: Array<Expense & { is_overdue: boolean }>;
+  unpaid_total: number;
+  overdue_total: number;
+  count: number;
+  farms: ObligationsFarmRow[];
 }
 
 export const SINGLE_PROFILE_ID = 1;

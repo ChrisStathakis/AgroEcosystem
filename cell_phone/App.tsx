@@ -9,6 +9,8 @@ import { migrate } from './src/db/client';
 import { seedDefaults } from './src/db/seed';
 import { loadLang } from './src/lib/i18n';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { ThemeProvider } from './src/components/ThemeProvider';
+import { loadThemePreference, useColors } from './src/components/theme';
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -18,6 +20,7 @@ export default function App() {
     (async () => {
       try {
         await loadLang();
+        await loadThemePreference();
         await migrate();
         await seedDefaults();
         setReady(true);
@@ -28,16 +31,7 @@ export default function App() {
   }, []);
 
   if (error) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#F6F7F2' }}>
-        <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#F9E2DC', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-          <Ionicons name="warning-outline" size={26} color="#B3402E" />
-        </View>
-        <Text style={{ fontWeight: '800', fontSize: 16, marginBottom: 6 }}>Cannot open workspace</Text>
-        <Text style={{ color: '#6B7A75', textAlign: 'center' }}>{error}</Text>
-        <StatusBar style="auto" />
-      </View>
-    );
+    return <ErrorScreen message={error} />;
   }
   if (!ready) {
     return (
@@ -55,11 +49,27 @@ export default function App() {
     );
   }
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
+    <ThemeProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </GestureHandlerRootView>
+    </ThemeProvider>
+  );
+}
+
+/** Boot/DB failure screen — themed, but outside the navigator. */
+function ErrorScreen({ message }: { message: string }) {
+  const theme = useColors();
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: theme.bg }}>
+      <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: theme.dangerSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+        <Ionicons name="warning-outline" size={26} color={theme.danger} />
+      </View>
+      <Text style={{ fontWeight: '800', fontSize: 16, marginBottom: 6, color: theme.ink }}>Cannot open workspace</Text>
+      <Text style={{ color: theme.muted, textAlign: 'center' }}>{message}</Text>
       <StatusBar style="auto" />
-    </GestureHandlerRootView>
+    </View>
   );
 }

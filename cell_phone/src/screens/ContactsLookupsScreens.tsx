@@ -6,7 +6,7 @@ import { createLookup, deleteLookup, listLookups, updateLookup, type LookupTable
 import { Screen } from './Screen';
 import { t } from '../lib/i18n';
 import { AppButton, AppInput, AvatarDot, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 
 export function ContactsScreen({ route }: any) {
   const kind = (route?.params?.kind ?? 'vendors') as 'vendors' | 'customers';
@@ -18,6 +18,7 @@ export function ContactsScreen({ route }: any) {
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const theme = useColors();
   const refresh = useCallback(async () => {
     setRows(kind === 'vendors' ? await listVendors(q) : await listCustomers(q));
   }, [q, kind]);
@@ -100,6 +101,7 @@ export function LookupsScreen({ route }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [name, setName] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const theme = useColors();
   const refresh = useCallback(async () => setRows(await listLookups(table)), [table]);
   useFocusEffect(useCallback(() => { refresh(); setEditingId(null); setName(''); }, [refresh]));
   return (

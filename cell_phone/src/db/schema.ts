@@ -1,11 +1,14 @@
-// Current schema (v4). Ports Django constraints:
+// Current schema (v5). Ports Django constraints:
 // UNIQUE(profile,title/name), UNIQUE(farm,tree_type), PROTECT via
 // RESTRICT-equivalent checks in repositories (SQLite RESTRICT).
 // v4 adds is_archived to expenses/incomes (server 0004/0005):
 // archived rows stay in lists/reports but are hidden from task dropdowns.
+// v5 ports server 0005/0006: expenses.farm_id becomes optional (NULL = shared
+// expense, split across farms by tree count) and expenses.is_paid appears
+// (unpaid rows feed the obligations report).
 
-export const SCHEMA_VERSION = 4;
-export const SCHEMA_V4 = `
+export const SCHEMA_VERSION = 5;
+export const SCHEMA_V5 = `
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -108,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_tree_movements_planting_date ON tree_inventory_mo
 CREATE TABLE IF NOT EXISTS expenses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  farm_id INTEGER NOT NULL REFERENCES farms(id) ON DELETE RESTRICT,
+  farm_id INTEGER REFERENCES farms(id) ON DELETE RESTRICT,
   category_id INTEGER NOT NULL REFERENCES expense_categories(id) ON DELETE RESTRICT,
   vendor_id INTEGER REFERENCES vendors(id) ON DELETE RESTRICT,
   title TEXT NOT NULL,
@@ -117,6 +120,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   date TEXT NOT NULL,
   document_type TEXT NOT NULL CHECK (document_type IN ('invoice','receipt')),
   include_in_tax INTEGER NOT NULL DEFAULT 0,
+  is_paid INTEGER NOT NULL DEFAULT 1,
   is_archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -166,5 +170,6 @@ CREATE TABLE IF NOT EXISTS farm_tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_profile_date ON farm_tasks(profile_id, date);
 `;
 
-/** Back-compat alias: v3 code imports SCHEMA_V3. */
-export const SCHEMA_V3 = SCHEMA_V4;
+/** Back-compat aliases: older code imports SCHEMA_V3 / SCHEMA_V4. */
+export const SCHEMA_V4 = SCHEMA_V5;
+export const SCHEMA_V3 = SCHEMA_V5;

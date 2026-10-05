@@ -12,6 +12,8 @@ export interface TxnFilters {
   end?: string;
   document_type?: 'invoice' | 'receipt';
   tax?: 'all' | 'taxed' | 'untaxed';
+  /** Payment status (expenses only; incomes are always "paid"). */
+  paid?: 'all' | 'paid' | 'unpaid';
   /** Default hides nothing (archived stays in lists, like server). Pass true/false to filter. */
   is_archived?: boolean;
 }
@@ -29,9 +31,12 @@ function whereClause(filters: TxnFilters, alias: string, income = false): { sql:
     params.push(q, q);
   }
   if (filters.farm_id) {
-    sql += income
-      ? ` AND EXISTS (SELECT 1 FROM income_farm_allocations ia WHERE ia.income_id = ${alias}.id AND ia.farm_id = ?)`
-      : ` AND ${alias}.farm_id = ?`;
+    if (income) {
+      sql += ` AND EXISTS (SELECT 1 FROM income_farm_allocations ia WHERE ia.income_id = ${alias}.id AND ia.farm_id = ?)`;
+    } else {
+      // Shared expenses (no farm) apply to every farm (server _apply_common).
+      sql += ` AND (${alias}.farm_id = ? OR ${alias}.farm_id IS NULL)`;
+    }
     params.push(filters.farm_id);
   }
   if (filters.category_id) {
@@ -64,6 +69,10 @@ function whereClause(filters: TxnFilters, alias: string, income = false): { sql:
   }
   if (filters.tax === 'taxed') sql += ` AND ${alias}.include_in_tax = 1`;
   else if (filters.tax === 'untaxed') sql += ` AND ${alias}.include_in_tax = 0`;
+  if (!income && filters.paid && filters.paid !== 'all') {
+    sql += ` AND ${alias}.is_paid = ?`;
+    params.push(filters.paid === 'paid' ? 1 : 0);
+  }
   if (typeof filters.is_archived === 'boolean') {
     sql += ` AND ${alias}.is_archived = ?`;
     params.push(filters.is_archived ? 1 : 0);
@@ -76,7 +85,7 @@ export async function listExpenses(filters: TxnFilters = {}): Promise<Expense[]>
   const { sql, params } = whereClause(filters, 'e');
   return db.getAllAsync<Expense>(
     `SELECT e.*, f.title AS farm_title, c.name AS category_name, v.name AS contact_name
-     FROM expenses e JOIN farms f ON f.id = e.farm_id JOIN expense_categories c ON c.id = e.category_id
+     FROM expenses e LEFT JOIN farms f ON f.id = e.farm_id JOIN expense_categories c ON c.id = e.category_id
      LEFT JOIN vendors v ON v.id = e.vendor_id WHERE ${sql} ORDER BY e.date DESC, e.id DESC`,
     params,
   );
@@ -99,11 +108,12 @@ export async function listIncomes(filters: TxnFilters = {}): Promise<Income[]> {
 /** Active (non-archived) expenses for task dropdowns — port of FarmTaskForm expense queryset. */
 export async function listActiveExpensesForTasks(farmId?: number): Promise<Expense[]> {
   const db = getDb();
-  let sql = `SELECT e.*, f.title AS farm_title FROM expenses e JOIN farms f ON f.id = e.farm_id
+  let sql = `SELECT e.*, f.title AS farm_title FROM expenses e LEFT JOIN farms f ON f.id = e.farm_id
     WHERE e.profile_id = ? AND e.is_archived = 0`;
   const params: SQLiteBindValue[] = [SINGLE_PROFILE_ID];
   if (farmId) {
-    sql += ' AND e.farm_id = ?';
+    // Shared (farm-less) expenses are linkable to every farm (server forms.py).
+    sql += ' AND (e.farm_id = ? OR e.farm_id IS NULL)';
     params.push(farmId);
   }
   sql += ' ORDER BY e.date DESC, e.id DESC';
@@ -111,7 +121,8 @@ export async function listActiveExpensesForTasks(farmId?: number): Promise<Expen
 }
 
 export interface TxnInput {
-  farm_id: number;
+  /** null/undefined = shared expense split across farms by tree count. */
+  farm_id?: number | null;
   category_id: number;
   contact_id?: number | null;
   title: string;
@@ -120,6 +131,7 @@ export interface TxnInput {
   date: string;
   document_type: 'invoice' | 'receipt';
   include_in_tax: boolean;
+  is_paid?: boolean;
   is_archived?: boolean;
   allocations?: Array<{ farm_id: number; amount: number }>;
 }
@@ -151,9 +163,9 @@ export async function createExpense(input: TxnInput): Promise<number> {
   const db = getDb();
   const now = nowISO();
   const res = await db.runAsync(
-    `INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_archived, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [SINGLE_PROFILE_ID, input.farm_id, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_archived ? 1 : 0, now, now],
+    `INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [SINGLE_PROFILE_ID, input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, now, now],
   );
   return res.lastInsertRowId;
 }
@@ -163,9 +175,9 @@ export async function updateExpense(id: number, input: TxnInput): Promise<void> 
   const db = getDb();
   await db.runAsync(
     `UPDATE expenses SET farm_id = ?, category_id = ?, vendor_id = ?, title = ?, description = ?, amount = ?,
-      date = ?, document_type = ?, include_in_tax = ?, is_archived = ?, updated_at = ?
+      date = ?, document_type = ?, include_in_tax = ?, is_paid = ?, is_archived = ?, updated_at = ?
      WHERE id = ? AND profile_id = ?`,
-    [input.farm_id, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_archived ? 1 : 0, nowISO(), id, SINGLE_PROFILE_ID],
+    [input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, nowISO(), id, SINGLE_PROFILE_ID],
   );
 }
 

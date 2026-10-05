@@ -1,20 +1,37 @@
 import { getDb } from '../client';
 import {
   SINGLE_PROFILE_ID,
+  todayISODate,
   type AnalyticsFilters,
   type CashFlowRow,
   type CategoryTotal,
+  type Expense,
   type FarmProfitRow,
   type FinancialSummary,
   type MonthlyRow,
+  type ObligationsFarmRow,
+  type ObligationsReport,
 } from '../types';
 import type { SQLiteBindValue } from 'expo-sqlite';
+import { expenseAmountExpr, farmTreeWeights, shareRatio } from './split';
 
 // Port of server/analytics/services.py for offline SQLite.
 // Supports year OR custom start/end plus farm/category/vendor/customer/
 // document/tax dimensions, allocation-aware farm profit, category
-// breakdown, cumulative balance, P&L / cash-flow / tax reports.
+// breakdown, cumulative balance, P&L / cash-flow / tax / obligations
+// reports. Expense figures are split-aware: a farm filter counts shared
+// (farm-less) expenses at that farm's tree-count share, exactly like
+// `_split_aware_expense_total` on the server.
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Share of shared expenses for the active farm filter (null = no farm
+ * filter → plain sums, shared rows counted once in full).
+ */
+async function expenseRatioFor(f: AnalyticsFilters): Promise<number | null> {
+  if (!f.farm_id) return null;
+  return shareRatio(await farmTreeWeights(), f.farm_id);
+}
 
 export interface ResolvedPeriod {
   start: string;
@@ -42,7 +59,8 @@ function expenseWhere(f: AnalyticsFilters, p: ResolvedPeriod): { sql: string; pa
   let sql = 'e.profile_id = ? AND e.date >= ? AND e.date <= ?';
   const params: SQLiteBindValue[] = [SINGLE_PROFILE_ID, p.start, p.end];
   if (f.farm_id) {
-    sql += ' AND e.farm_id = ?';
+    // Shared expenses apply to every farm (server _apply_common).
+    sql += ' AND (e.farm_id = ? OR e.farm_id IS NULL)';
     params.push(f.farm_id);
   }
   if (f.expense_category_id) {
@@ -115,26 +133,32 @@ export async function financialSummary(yearOrFilters?: number | AnalyticsFilters
   const db = getDb();
   const ew = expenseWhere(filters, p);
   const iw = incomeWhere(filters, p);
-  const sum = async (table: 'expenses' | 'incomes', extra: string, w: { sql: string; params: SQLiteBindValue[] }) => {
+  // Shared expenses are counted at the filtered farm's share (server: farm = f.get("farm")).
+  const expExpr = expenseAmountExpr('e', await expenseRatioFor(filters));
+  const sum = async (
+    table: 'expenses' | 'incomes',
+    amountExpr: string,
+    extra: string,
+    w: { sql: string; params: SQLiteBindValue[] },
+  ) => {
     const row = await db.getFirstAsync<{ total: number | null }>(
-      `SELECT SUM(amount) AS total FROM ${table} ${table === 'expenses' ? 'e' : 'i'} WHERE ${w.sql} ${extra}`,
+      `SELECT SUM(${amountExpr}) AS total FROM ${table} ${table === 'expenses' ? 'e' : 'i'} WHERE ${w.sql} ${extra}`,
       w.params,
     );
     return row?.total ?? 0;
   };
-  const income_total = await sum('incomes', '', iw);
-  const expense_total = await sum('expenses', '', ew);
-  const taxable_income = await sum('incomes', 'AND include_in_tax = 1', iw);
-  const deductible_expenses = await sum('expenses', 'AND include_in_tax = 1', ew);
+  const income_total = await sum('incomes', 'i.amount', '', iw);
+  const expense_total = await sum('expenses', expExpr, '', ew);
+  const taxable_income = await sum('incomes', 'i.amount', 'AND i.include_in_tax = 1', iw);
+  const deductible_expenses = await sum('expenses', expExpr, 'AND e.include_in_tax = 1', ew);
 
   const byMonth = async (income: boolean) => {
-    const w = income ? iw : iw;
-    void w;
     const ww = income ? incomeWhere(filters, p) : expenseWhere(filters, p);
     const alias = income ? 'i' : 'e';
     const table = income ? 'incomes' : 'expenses';
+    const amountExpr = income ? 'i.amount' : expExpr;
     const rows = await db.getAllAsync<{ m: string; total: number }>(
-      `SELECT substr(${alias}.date,1,7) AS m, SUM(${alias}.amount) AS total FROM ${table} ${alias} WHERE ${ww.sql} GROUP BY m`,
+      `SELECT substr(${alias}.date,1,7) AS m, SUM(${amountExpr}) AS total FROM ${table} ${alias} WHERE ${ww.sql} GROUP BY m`,
       ww.params,
     );
     const map = new Map<string, number>();
@@ -176,13 +200,15 @@ export async function categoryBreakdown(
   const db = getDb();
   const ew = expenseWhere(filters, p);
   const iw = incomeWhere(filters, p);
+  const expExpr = expenseAmountExpr('e', await expenseRatioFor(filters));
   const top = async (income: boolean): Promise<CategoryTotal[]> => {
     const w = income ? iw : ew;
     const alias = income ? 'i' : 'e';
     const table = income ? 'incomes' : 'expenses';
     const catTable = income ? 'income_categories' : 'expense_categories';
+    const amountExpr = income ? 'i.amount' : expExpr;
     const rows = await db.getAllAsync<{ label: string | null; total: number }>(
-      `SELECT c.name AS label, SUM(${alias}.amount) AS total FROM ${table} ${alias}
+      `SELECT c.name AS label, SUM(${amountExpr}) AS total FROM ${table} ${alias}
        JOIN ${catTable} c ON c.id = ${alias}.category_id WHERE ${w.sql}
        GROUP BY ${alias}.category_id ORDER BY total DESC`,
       w.params,
@@ -210,6 +236,7 @@ export async function farmProfit(yearOrFilters?: number | AnalyticsFilters): Pro
     farmParams.push(filters.farm_id);
   }
   const farms = await db.getAllAsync<{ id: number; title: string }>(farmSql, farmParams);
+  const weights = await farmTreeWeights();
   const rows: FarmProfitRow[] = [];
   for (const farm of farms) {
     let allocSql = `SELECT COALESCE(SUM(ia.amount),0) AS total FROM income_farm_allocations ia
@@ -231,11 +258,12 @@ export async function farmProfit(yearOrFilters?: number | AnalyticsFilters): Pro
     else if (filters.tax === 'untaxed') allocSql += ' AND i.include_in_tax = 0';
     const income = (await db.getFirstAsync<{ total: number }>(allocSql, allocParams))?.total ?? 0;
     const ew = expenseWhere({ ...filters, farm_id: farm.id }, p);
-    // expenseWhere already constrains farm; reuse with farm pinned.
+    // expenseWhere already pins the farm (direct + shared rows); count the
+    // shared part at this farm's tree-count share (server: farm_profit).
     const expense =
       (
         await db.getFirstAsync<{ total: number }>(
-          `SELECT COALESCE(SUM(e.amount),0) AS total FROM expenses e WHERE ${ew.sql}`,
+          `SELECT COALESCE(SUM(${expenseAmountExpr('e', shareRatio(weights, farm.id))}),0) AS total FROM expenses e WHERE ${ew.sql}`,
           ew.params,
         )
       )?.total ?? 0;
@@ -318,8 +346,27 @@ export async function taxReport(filters: AnalyticsFilters = {}) {
   const db = getDb();
   const iw = incomeWhere(taxed, p);
   const ew = expenseWhere(taxed, p);
-  const incomes = await db.getAllAsync(`SELECT * FROM incomes i WHERE ${iw.sql} ORDER BY i.date, i.id`, iw.params);
-  const expenses = await db.getAllAsync(`SELECT * FROM expenses e WHERE ${ew.sql} ORDER BY e.date, e.id`, ew.params);
+  // Join names so the report/CSV print labels instead of raw ids (server uses select_related).
+  const incomes = await db.getAllAsync(
+    `SELECT i.*, c.name AS category_name, cu.name AS contact_name,
+            (SELECT GROUP_CONCAT(f.title || ' (' || printf('%.2f', ia.amount) || ')', ', ')
+             FROM income_farm_allocations ia JOIN farms f ON f.id = ia.farm_id WHERE ia.income_id = i.id) AS farm_summary,
+            i.amount - COALESCE((SELECT SUM(ia.amount) FROM income_farm_allocations ia WHERE ia.income_id = i.id), 0) AS unallocated_amount
+     FROM incomes i
+     LEFT JOIN income_categories c ON c.id = i.category_id
+     LEFT JOIN customers cu ON cu.id = i.customer_id
+     WHERE ${iw.sql} ORDER BY i.date, i.id`,
+    iw.params,
+  );
+  const expenses = await db.getAllAsync(
+    `SELECT e.*, f.title AS farm_title, c.name AS category_name, v.name AS contact_name
+     FROM expenses e
+     LEFT JOIN farms f ON f.id = e.farm_id
+     LEFT JOIN expense_categories c ON c.id = e.category_id
+     LEFT JOIN vendors v ON v.id = e.vendor_id
+     WHERE ${ew.sql} ORDER BY e.date, e.id`,
+    ew.params,
+  );
   const summary = await financialSummary(filters);
   return {
     period_label: p.label,
@@ -330,6 +377,89 @@ export async function taxReport(filters: AnalyticsFilters = {}) {
     income_total: summary.taxable_income,
     expense_total: summary.deductible_expenses,
     net: summary.taxable_net,
+  };
+}
+
+/**
+ * Port of analytics.services.obligations_report: unpaid expenses for the
+ * filtered period with totals, overdue figures and a per-farm split of the
+ * shared (farm-less) rows by tree count.
+ */
+export async function obligationsReport(filters: AnalyticsFilters = {}): Promise<ObligationsReport> {
+  const p = resolvePeriod(filters.year || filters.start || filters.end ? filters : { ...filters, year: new Date().getFullYear() });
+  const db = getDb();
+  const ew = expenseWhere(filters, p);
+  const unpaidSql = `${ew.sql} AND e.is_paid = 0`;
+  const ratio = await expenseRatioFor(filters);
+  const expExpr = expenseAmountExpr('e', ratio);
+  const today = todayISODate();
+  const params = [...ew.params];
+
+  const sumUnpaid = async (sql: string, pms: SQLiteBindValue[]): Promise<number> => {
+    const row = await db.getFirstAsync<{ total: number | null }>(
+      `SELECT COALESCE(SUM(${expExpr}), 0) AS total FROM expenses e WHERE ${sql}`,
+      pms,
+    );
+    return row?.total ?? 0;
+  };
+
+  const unpaid_total = await sumUnpaid(unpaidSql, params);
+  const overdueSql = `${unpaidSql} AND e.date < ?`;
+  const overdue_total = await sumUnpaid(overdueSql, [...params, today]);
+
+  const items = await db.getAllAsync<Expense & { is_overdue: boolean }>(
+    `SELECT e.*, f.title AS farm_title, c.name AS category_name, v.name AS contact_name,
+            (e.date < ?) AS is_overdue
+     FROM expenses e
+     LEFT JOIN farms f ON f.id = e.farm_id
+     LEFT JOIN expense_categories c ON c.id = e.category_id
+     LEFT JOIN vendors v ON v.id = e.vendor_id
+     WHERE ${unpaidSql} ORDER BY e.date, e.id`,
+    [today, ...params],
+  );
+
+  let farmSql = 'SELECT id, title FROM farms WHERE profile_id = ? ORDER BY title';
+  const farmParams: SQLiteBindValue[] = [SINGLE_PROFILE_ID];
+  if (filters.farm_id) {
+    farmSql = 'SELECT id, title FROM farms WHERE profile_id = ? AND id = ? ORDER BY title';
+    farmParams.push(filters.farm_id);
+  }
+  const farms = await db.getAllAsync<{ id: number; title: string }>(farmSql, farmParams);
+  const weights = await farmTreeWeights();
+  const farmSplit = async (farmId: number, sql: string, extraParams: SQLiteBindValue[] = []): Promise<number> => {
+    const r = shareRatio(weights, farmId);
+    const direct =
+      (await db.getFirstAsync<{ total: number | null }>(
+        `SELECT COALESCE(SUM(e.amount), 0) AS total FROM expenses e WHERE ${sql} AND e.farm_id = ?`,
+        [...params, ...extraParams, farmId],
+      ))?.total ?? 0;
+    const shared =
+      (await db.getFirstAsync<{ total: number | null }>(
+        `SELECT COALESCE(SUM(e.amount), 0) AS total FROM expenses e WHERE ${sql} AND e.farm_id IS NULL`,
+        [...params, ...extraParams],
+      ))?.total ?? 0;
+    return direct + shared * r;
+  };
+  const rows: ObligationsFarmRow[] = [];
+  for (const farm of farms) {
+    rows.push({
+      farm: farm.title,
+      unpaid: await farmSplit(farm.id, unpaidSql),
+      overdue: await farmSplit(farm.id, overdueSql, [today]),
+    });
+  }
+  rows.sort((a, b) => b.unpaid - a.unpaid);
+
+  return {
+    period_label: p.label,
+    start: p.start,
+    end: p.end,
+    year: p.year,
+    items,
+    unpaid_total,
+    overdue_total,
+    count: items.length,
+    farms: rows,
   };
 }
 
@@ -390,7 +520,7 @@ export function sanitizePeriodForFilename(period: string): string {
 export async function recentTransactions(limit = 6) {
   const db = getDb();
   const expenses = await db.getAllAsync<any>(
-    `SELECT e.*, f.title AS farm_title FROM expenses e JOIN farms f ON f.id = e.farm_id
+    `SELECT e.*, f.title AS farm_title FROM expenses e LEFT JOIN farms f ON f.id = e.farm_id
      WHERE e.profile_id = ? ORDER BY e.date DESC, e.id DESC LIMIT ?`,
     [SINGLE_PROFILE_ID, limit],
   );

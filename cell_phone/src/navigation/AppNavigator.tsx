@@ -9,22 +9,23 @@ import { ExpensesScreen, IncomesScreen } from '../screens/TransactionsScreens';
 import { ContactsScreen, LookupsScreen } from '../screens/ContactsLookupsScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { DrawerContent } from './DrawerContent';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 
 const Drawer = createDrawerNavigator();
 
 export function AppNavigator() {
+  const theme = useColors();
   return (
     <Drawer.Navigator
       initialRouteName="Overview"
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
-        headerTintColor: theme.pine,
-        headerStyle: { backgroundColor: '#F6F7F2' },
-        headerTitleStyle: { fontWeight: '800', fontSize: 16 },
+        headerTintColor: theme.green,
+        headerStyle: { backgroundColor: theme.bg },
+        headerTitleStyle: { fontWeight: '800', fontSize: 16, color: theme.ink },
         headerShadowVisible: false,
         drawerType: 'slide',
-        drawerStyle: { width: 300, backgroundColor: '#FAFAF6', borderTopRightRadius: 24, borderBottomRightRadius: 24 },
+        drawerStyle: { width: 300, backgroundColor: theme.card, borderTopRightRadius: 24, borderBottomRightRadius: 24 },
         sceneStyle: { backgroundColor: theme.bg },
       }}
     >

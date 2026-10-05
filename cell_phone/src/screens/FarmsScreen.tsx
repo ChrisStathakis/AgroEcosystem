@@ -7,7 +7,7 @@ import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
 import { t } from '../lib/i18n';
 import { AppButton, AppInput, AvatarDot, Badge, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 export function FarmsScreen() {
@@ -18,6 +18,7 @@ export function FarmsScreen() {
   const [active, setActive] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const theme = useColors();
 
   const refresh = useCallback(async () => setRows(await listFarms(q)), [q]);
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));

@@ -9,18 +9,20 @@ import { SINGLE_PROFILE_ID } from '../db/types';
 import { buildBackup, describePayload, destroyWorkspace, restoreBackup, workspaceCounts } from '../db/backup';
 import { Screen } from './Screen';
 import { getLang, setLang, t } from '../lib/i18n';
-import { AppButton, AppInput, Badge, Card, SectionTitle } from '../components/ui';
-import { theme } from '../components/theme';
+import { AppButton, AppInput, Badge, Card, SectionTitle, SegmentedTabs } from '../components/ui';
+import { getThemePreference, setThemePreference, useColors, type ThemePreference } from '../components/theme';
 
 export function SettingsScreen() {
   const [name, setName] = useState('');
   const [lang, setLangState] = useState(getLang());
+  const [themePref, setThemePref] = useState<ThemePreference>(getThemePreference());
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [preview, setPreview] = useState<Record<string, number> | null>(null);
   const [pending, setPending] = useState<any | null>(null);
   const [pendingName, setPendingName] = useState('');
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
   const [confirmName, setConfirmName] = useState('');
+  const theme = useColors();
 
   const refresh = useCallback(async () => {
     const row = await getDb().getFirstAsync<{ display_name: string }>('SELECT display_name FROM profiles WHERE id = ?', [SINGLE_PROFILE_ID]);
@@ -141,6 +143,23 @@ export function SettingsScreen() {
       </Card>
 
       <Card style={{ marginTop: 12 }}>
+        <SectionTitle title={t('appearance')} />
+        <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>{t('appearance_hint')}</Text>
+        <SegmentedTabs<ThemePreference>
+          value={themePref}
+          onChange={(p) => {
+            setThemePreference(p);
+            setThemePref(p);
+          }}
+          options={[
+            { id: 'light', label: t('theme_light') },
+            { id: 'dark', label: t('theme_dark') },
+            { id: 'system', label: t('theme_system') },
+          ]}
+        />
+      </Card>
+
+      <Card style={{ marginTop: 12 }}>
         <SectionTitle title="Backup" action={<Badge label={mode} tone="blue" />} />
         <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Current rows: {counts ? JSON.stringify(counts) : '…'}</Text>
         <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 8 }}>Same JSON format as the website backup, including replace/merge modes.</Text>
@@ -161,7 +180,7 @@ export function SettingsScreen() {
         <Text style={{ color: theme.muted, fontSize: 12, marginTop: 8 }}>Replace wipes workspace first; merge keeps existing rows.</Text>
       </Card>
 
-      <Card style={{ marginTop: 12, backgroundColor: '#FFF5F3', borderColor: '#F0C9C0' }}>
+      <Card style={{ marginTop: 12, backgroundColor: theme.dangerSoft, borderColor: theme.danger }}>
         <Text style={{ fontWeight: '800', fontSize: 16, color: theme.danger }}>Danger zone</Text>
         <AppInput value={confirmName} onChangeText={setConfirmName} placeholder="Type to confirm deletion" icon="warning-outline" />
         <AppButton title="Delete all workspace data" variant="danger" icon="trash-outline" onPress={confirmDestroy} />

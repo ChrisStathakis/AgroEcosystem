@@ -13,6 +13,7 @@ function money(n: number | string): string {
 /**
  * Port of server record_export. Mobile intentionally adds an is_archived column
  * (superset of the website CSV) so archive state survives spreadsheet round-trips.
+ * Expenses also carry is_paid (server export parity).
  */
 export function transactionsToCSV(
   kind: 'expenses' | 'incomes',
@@ -21,12 +22,12 @@ export function transactionsToCSV(
   const contact = kind === 'expenses' ? 'vendor' : 'customer';
   const header = kind === 'incomes'
     ? ['title', 'date', 'farms', 'unallocated', 'category', contact, 'document_type', 'include_in_tax', 'is_archived', 'amount', 'description']
-    : ['title', 'date', 'farm', 'category', contact, 'document_type', 'include_in_tax', 'is_archived', 'amount', 'description'];
+    : ['title', 'date', 'farm', 'category', contact, 'document_type', 'include_in_tax', 'is_paid', 'is_archived', 'amount', 'description'];
   const lines = [header.join(',')];
   for (const r of rows) {
     const farm = kind === 'incomes'
       ? (r as Income).farm_summary ?? 'Unallocated'
-      : (r as Expense).farm_title ?? String((r as Expense).farm_id);
+      : (r as Expense).farm_title ?? 'All farms (split)';
     const unallocated = kind === 'incomes' ? money((r as Income).unallocated_amount ?? 0) : null;
     const base = [
       csvCell(r.title),
@@ -39,6 +40,9 @@ export function transactionsToCSV(
       csvCell(r.contact_name ?? ''),
       r.document_type,
       r.include_in_tax ? 'yes' : 'no',
+    );
+    if (kind === 'expenses') base.push((r as Expense).is_paid ? 'yes' : 'no');
+    base.push(
       (r as Expense).is_archived ? 'yes' : 'no',
       money(r.amount),
       csvCell(r.description ?? ''),
@@ -99,6 +103,34 @@ export function taxToCSV(data: {
   lines.push(['taxable income', '', '', '', '', money(data.income_total)].join(','));
   lines.push(['deductible expenses', '', '', '', '', money(data.expense_total)].join(','));
   lines.push(['taxable net', '', '', '', '', money(data.net)].join(','));
+  return lines.join('\n');
+}
+
+/** Port of analytics_export("obligations"): unpaid line items + overdue flag. */
+export function obligationsToCSV(data: {
+  items: Array<{
+    title: string; date: string; farm_title?: string | null;
+    category_name?: string; category_id: number; contact_name?: string | null;
+    amount: number; is_overdue?: boolean;
+  }>;
+  unpaid_total: number; overdue_total: number; count: number;
+}): string {
+  const lines = ['title,date,farm,category,vendor,amount,overdue'];
+  for (const item of data.items) {
+    lines.push([
+      csvCell(item.title),
+      item.date,
+      csvCell(item.farm_title ?? 'All farms (split)'),
+      csvCell(item.category_name ?? String(item.category_id)),
+      csvCell(item.contact_name ?? ''),
+      money(item.amount),
+      item.is_overdue ? 'yes' : 'no',
+    ].join(','));
+  }
+  lines.push('');
+  lines.push(['unpaid total', '', '', '', '', money(data.unpaid_total), ''].join(','));
+  lines.push(['overdue', '', '', '', '', money(data.overdue_total), ''].join(','));
+  lines.push(['open items', '', '', '', '', String(data.count), ''].join(','));
   return lines.join('\n');
 }
 

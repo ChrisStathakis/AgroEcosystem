@@ -103,10 +103,13 @@ export async function buildBackup(): Promise<any> {
       effective_date: m.effective_date, notes: m.notes ?? '',
     })),
     expenses: expenses.map((e: any) => ({
-      farm: farmIdx.get(e.farm_id), category: expenseCatIdx.get(e.category_id),
+      // null farm = shared expense split across farms (server 0005).
+      farm: e.farm_id == null ? null : farmIdx.get(e.farm_id) ?? null,
+      category: expenseCatIdx.get(e.category_id),
       vendor: e.vendor_id ? vendorIdx.get(e.vendor_id) ?? null : null,
       title: e.title, description: e.description ?? '', amount: String(e.amount), date: e.date,
-      document_type: e.document_type, include_in_tax: !!e.include_in_tax, is_archived: !!e.is_archived,
+      document_type: e.document_type, include_in_tax: !!e.include_in_tax, is_paid: !!e.is_paid,
+      is_archived: !!e.is_archived,
     })),
     incomes: incomes.map((i: any) => ({
       allocations: (allocByIncome.get(i.id) ?? []).map((a: any) => ({ farm: farmIdx.get(a.farm_id), amount: String(a.amount) })),
@@ -259,13 +262,14 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
 
     const expenses: any[] = [];
     for (const item of requireList(payload, 'expenses')) {
-      const farm = requireIndex(farms, item.farm, 'expenses', 'farm');
+      // farm: null/absent = shared expense (legacy backups always carry a farm).
+      const farm = item.farm != null ? requireIndex(farms, item.farm, 'expenses', 'farm') : null;
       const category = requireIndex(expenseCats, item.category, 'expenses', 'category');
       const vendor = item.vendor != null ? requireIndex(vendors, item.vendor, 'expenses', 'vendor') : null;
       if (mode === 'merge') {
         const dup = await db.getFirstAsync<any>(
-          'SELECT * FROM expenses WHERE profile_id = ? AND farm_id = ? AND title = ? AND date = ? AND amount = ?',
-          [SINGLE_PROFILE_ID, farm.id, item.title ?? '', item.date, item.amount ?? 0],
+          'SELECT * FROM expenses WHERE profile_id = ? AND farm_id IS ? AND title = ? AND date = ? AND amount = ?',
+          [SINGLE_PROFILE_ID, farm?.id ?? null, item.title ?? '', item.date, item.amount ?? 0],
         );
         if (dup) {
           expenses.push(dup);
@@ -273,9 +277,10 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
         }
       }
       const res = await db.runAsync(
-        'INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [SINGLE_PROFILE_ID, farm.id, category.id, vendor?.id ?? null, item.title ?? '', item.description ?? '', item.amount ?? 0, item.date,
-          checkedDocument(item.document_type, 'expenses'), item.include_in_tax ? 1 : 0, item.is_archived ? 1 : 0, nowISO(), nowISO()],
+        'INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [SINGLE_PROFILE_ID, farm?.id ?? null, category.id, vendor?.id ?? null, item.title ?? '', item.description ?? '', item.amount ?? 0, item.date,
+          checkedDocument(item.document_type, 'expenses'), item.include_in_tax ? 1 : 0, item.is_paid === false ? 0 : 1,
+          item.is_archived ? 1 : 0, nowISO(), nowISO()],
       );
       expenses.push((await db.getFirstAsync<any>('SELECT * FROM expenses WHERE id = ?', [res.lastInsertRowId]))!);
     }

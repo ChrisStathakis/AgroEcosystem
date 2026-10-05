@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { SCHEMA_V4, SCHEMA_VERSION } from './schema';
+import { SCHEMA_V5, SCHEMA_VERSION } from './schema';
 import { nowISO, SINGLE_PROFILE_ID } from './types';
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -21,7 +21,7 @@ export async function migrate(): Promise<void> {
   );
   if (hasTables?.n && version < 2) await migrateLegacyTreeHistory(database);
   if (hasIncomes?.n && version < 3) await migrateLegacyIncomeAllocations(database);
-  const statements = SCHEMA_V4.split(';')
+  const statements = SCHEMA_V5.split(';')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   // Run PRAGMA first, then the rest.
@@ -33,6 +33,8 @@ export async function migrate(): Promise<void> {
   // v4: is_archived on expenses/incomes (server 0004/0005). CREATE TABLE IF NOT
   // EXISTS won't add the column to old DBs, so patch explicitly.
   await migrateIsArchived(database);
+  // v5: optional farm + is_paid on expenses (server 0005/0006).
+  await migrateExpenseV5(database);
   await database.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   const now = nowISO();
   await database.runAsync(
@@ -181,4 +183,74 @@ export async function migrateIsArchived(database: SQLite.SQLiteDatabase): Promis
       );
     }
   }
+}
+
+/**
+ * v5 (server 0005_expense_farm_optional + 0006_expense_is_paid):
+ * expenses.farm_id becomes nullable (NULL = shared expense split by tree
+ * count) and expenses.is_paid is added (existing rows default to paid).
+ *
+ * SQLite cannot drop NOT NULL, so both expenses and farm_tasks (the only
+ * table referencing expenses) are rebuilt preserving every row — same
+ * approach as migrateLegacyTreeHistory.
+ */
+export async function migrateExpenseV5(database: SQLite.SQLiteDatabase): Promise<void> {
+  const exists = await database
+    .getFirstAsync<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'expenses'",
+    )
+    .catch(() => ({ n: 0 as number }));
+  if (!exists?.n) return; // fresh install already created the v5 table
+  if (await tableHasColumn(database, 'expenses', 'is_paid')) return; // already v5
+
+  await database.execAsync(`
+    PRAGMA foreign_keys = OFF;
+    DROP INDEX IF EXISTS idx_expenses_profile_date;
+    DROP INDEX IF EXISTS idx_tasks_profile_date;
+    ALTER TABLE farm_tasks RENAME TO farm_tasks_legacy;
+    ALTER TABLE expenses RENAME TO expenses_legacy;
+    CREATE TABLE expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      farm_id INTEGER REFERENCES farms(id) ON DELETE RESTRICT,
+      category_id INTEGER NOT NULL REFERENCES expense_categories(id) ON DELETE RESTRICT,
+      vendor_id INTEGER REFERENCES vendors(id) ON DELETE RESTRICT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      amount REAL NOT NULL CHECK (amount > 0),
+      date TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK (document_type IN ('invoice','receipt')),
+      include_in_tax INTEGER NOT NULL DEFAULT 0,
+      is_paid INTEGER NOT NULL DEFAULT 1,
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO expenses (id, profile_id, farm_id, category_id, vendor_id, title, description, amount, date,
+      document_type, include_in_tax, is_paid, is_archived, created_at, updated_at)
+    SELECT id, profile_id, farm_id, category_id, vendor_id, title, description, amount, date,
+      document_type, include_in_tax, 1, is_archived, created_at, updated_at
+    FROM expenses_legacy;
+    DROP TABLE expenses_legacy;
+    CREATE TABLE farm_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      farm_id INTEGER NOT NULL REFERENCES farms(id) ON DELETE RESTRICT,
+      planting_id INTEGER REFERENCES tree_plantings(id) ON DELETE SET NULL,
+      category_id INTEGER NOT NULL REFERENCES task_categories(id) ON DELETE RESTRICT,
+      expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      date TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO farm_tasks (id, profile_id, farm_id, planting_id, category_id, expense_id, title, description, date, created_at, updated_at)
+    SELECT id, profile_id, farm_id, planting_id, category_id, expense_id, title, description, date, created_at, updated_at
+    FROM farm_tasks_legacy;
+    DROP TABLE farm_tasks_legacy;
+    CREATE INDEX idx_expenses_profile_date ON expenses(profile_id, date);
+    CREATE INDEX idx_tasks_profile_date ON farm_tasks(profile_id, date);
+    PRAGMA foreign_keys = ON;
+  `);
 }

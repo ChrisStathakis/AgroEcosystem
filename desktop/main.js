@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -6,6 +6,12 @@ const os = require("node:os");
 const path = require("node:path");
 
 const isDev = !app.isPackaged;
+
+// Stable origin => localStorage (theme) survives restarts. If busy, the
+// backend falls back to a free port and the theme resets for that launch only.
+const PREFERRED_PORT = 8517;
+const THEME_BG = { light: "#f6f5ef", dark: "#121a16" };
+const SHOW_FALLBACK_MS = 3000;
 
 let backend = null;
 let mainWindow = null;
@@ -67,7 +73,7 @@ function waitForHttp(port, timeoutMs = 30000) {
 function startBackend() {
   const [candidate] = backendCandidates();
   backendPortFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agro-")), "port.txt");
-  const args = [...candidate.args, "--port", "0", "--port-file", backendPortFile];
+  const args = [...candidate.args, "--port", String(PREFERRED_PORT), "--port-file", backendPortFile];
   console.log(`[agro] spawning backend: ${candidate.cmd} ${args.join(" ")}`);
   backend = spawn(candidate.cmd, args, {
     cwd: candidate.cwd,
@@ -86,15 +92,49 @@ function createWindows(port) {
     height: 860,
     autoHideMenuBar: true,
     show: false,
+    backgroundColor: THEME_BG.light,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
   });
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+
+  // Stay hidden until we know the page's theme, so the window never flashes
+  // the wrong colour before the (possibly dark) page paints.
+  let shown = false;
+  const reveal = (theme) => {
+    if (theme === "dark" || theme === "light") {
+      try {
+        mainWindow.setBackgroundColor(THEME_BG[theme]);
+        nativeTheme.themeSource = theme;
+      } catch {}
+      console.log(`[agro] theme: ${theme}`);
+    }
+    if (!shown && mainWindow && !mainWindow.isDestroyed()) {
+      shown = true;
+      mainWindow.show();
+    }
+  };
+
+  // preload.js reports the resolved theme over IPC as soon as it runs.
+  ipcMain.removeAllListeners("agro:theme");
+  ipcMain.on("agro:theme", (_event, theme) => reveal(theme));
+
+  // Belt and braces: ask the page directly once the DOM exists (its inline
+  // script already applied localStorage/prefers-color-scheme), then show.
+  mainWindow.webContents.on("dom-ready", () => {
+    mainWindow.webContents
+      .executeJavaScript(
+        `(function(){try{return document.documentElement.getAttribute("data-bs-theme")}catch(e){return null}})()`
+      )
+      .then(reveal)
+      .catch(() => reveal(null));
+  });
+
+  // Never hang on a hidden window if neither path reports a theme.
+  setTimeout(() => reveal(null), SHOW_FALLBACK_MS);
+
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-  if (isDev) {
-    mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
-      console.error(`[agro] load failed ${code} ${desc} ${url}`);
-    });
-  }
+  mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    console.error(`[agro] load failed ${code} ${desc} ${url}`);
+  });
 }
 
 function showFatal(message) {

@@ -12,10 +12,13 @@ import { listCustomers, listVendors } from '../db/repositories/contacts';
 import { exportAndShare } from '../lib/csv';
 import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
-import { fmt, theme } from '../components/theme';
+import { fmt, useColors } from '../components/theme';
 import { isGreek, t } from '../lib/i18n';
 import { AppButton, AppInput, AppSelect, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle, type SelectOption } from '../components/ui';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
+
+/** One draft row of the income farm-allocation editor in TxnForm. */
+type AllocationDraft = { farm_id: string; amount: string };
 
 function useTxn(kind: 'expenses' | 'incomes') {
   const [rows, setRows] = useState<any[]>([]);
@@ -25,7 +28,11 @@ function useTxn(kind: 'expenses' | 'incomes') {
   const [end, setEnd] = useState('');
   const [doc, setDoc] = useState<'invoice' | 'receipt' | ''>('');
   const [tax, setTax] = useState<'all' | 'taxed' | 'untaxed'>('all');
+  const [paid, setPaid] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [showArchived, setShowArchived] = useState<'all' | 'active' | 'archived'>('all');
+  // Filter-only pickers (kept separate from the form's category/contact fields).
+  const [filterCatId, setFilterCatId] = useState('');
+  const [filterContactId, setFilterContactId] = useState('');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -33,6 +40,7 @@ function useTxn(kind: 'expenses' | 'incomes') {
   const [date, setDate] = useState(todayISODate());
   const [description, setDescription] = useState('');
   const [includeTax, setIncludeTax] = useState(kind === 'incomes');
+  const [isPaid, setIsPaid] = useState(true);
   const [isArchived, setIsArchived] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [farmOpts, setFarmOpts] = useState<SelectOption[]>([]);
@@ -43,10 +51,13 @@ function useTxn(kind: 'expenses' | 'incomes') {
     const f: any = {
       q,
       farm_id: farmId ? Number(farmId) : undefined,
+      category_id: filterCatId ? Number(filterCatId) : undefined,
+      contact_id: filterContactId ? Number(filterContactId) : undefined,
       start: start || undefined,
       end: end || undefined,
       document_type: doc || undefined,
       tax,
+      paid,
     };
     if (showArchived === 'active') f.is_archived = false;
     if (showArchived === 'archived') f.is_archived = true;
@@ -61,24 +72,33 @@ function useTxn(kind: 'expenses' | 'incomes') {
     } catch {
       // keep previous options
     }
-  }, [q, farmId, start, end, doc, tax, showArchived, kind]);
+  }, [q, farmId, filterCatId, filterContactId, start, end, doc, tax, paid, showArchived, kind]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
   return {
     rows, q, setQ, farmId, setFarmId, start, setStart, end, setEnd, doc, setDoc, tax, setTax,
-    showArchived, setShowArchived, title, setTitle, amount, setAmount, categoryId, setCategoryId,
+    paid, setPaid, showArchived, setShowArchived, filterCatId, setFilterCatId, filterContactId, setFilterContactId,
+    title, setTitle, amount, setAmount, categoryId, setCategoryId,
     contactId, setContactId, date, setDate, description, setDescription, includeTax, setIncludeTax,
-    isArchived, setIsArchived, editingId, setEditingId, farmOpts, catOpts, contactOpts, refresh,
+    isPaid, setIsPaid, isArchived, setIsArchived, editingId, setEditingId, farmOpts, catOpts, contactOpts, refresh,
   };
 }
 
-function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
+function FilterCard({ s, kind }: { s: ReturnType<typeof useTxn>; kind: 'expenses' | 'incomes' }) {
+  const theme = useColors();
   return (
     <Card>
       <SearchBar value={s.q} onChange={s.setQ} placeholder={t('search')} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         <Chip label={s.doc === '' ? 'All docs' : s.doc} onPress={() => s.setDoc(s.doc === '' ? 'invoice' : s.doc === 'invoice' ? 'receipt' : '')} tone={theme.sage} />
         <Chip label={`Tax: ${s.tax}`} onPress={() => s.setTax(s.tax === 'all' ? 'taxed' : s.tax === 'taxed' ? 'untaxed' : 'all')} tone={theme.sage} />
+        {kind === 'expenses' && (
+          <Chip
+            label={s.paid === 'all' ? t('all') : s.paid === 'paid' ? t('paid_only') : t('unpaid_only')}
+            onPress={() => s.setPaid(s.paid === 'all' ? 'paid' : s.paid === 'paid' ? 'unpaid' : 'all')}
+            tone={theme.sage}
+          />
+        )}
         <Chip
           label={s.showArchived === 'all' ? (isGreek() ? 'Όλα' : 'All') : s.showArchived === 'active' ? 'Active' : t('archived')}
           onPress={() => s.setShowArchived(s.showArchived === 'all' ? 'active' : s.showArchived === 'active' ? 'archived' : 'all')}
@@ -86,6 +106,26 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
         />
       </View>
       <AppSelect label="Farm" placeholder="All farms" value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} />
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <AppSelect
+            label="Category"
+            placeholder="All categories"
+            value={s.filterCatId || null}
+            options={s.catOpts}
+            onChange={(id) => s.setFilterCatId(id == null ? '' : String(id))}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppSelect
+            label={kind === 'expenses' ? 'Vendor' : 'Customer'}
+            placeholder={kind === 'expenses' ? 'All vendors' : 'All customers'}
+            value={s.filterContactId || null}
+            options={s.contactOpts}
+            onChange={(id) => s.setFilterContactId(id == null ? '' : String(id))}
+          />
+        </View>
+      </View>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}><AppInput label="From" placeholder="From YYYY-MM-DD" value={s.start} onChangeText={s.setStart} /></View>
         <View style={{ flex: 1 }}><AppInput label="To" placeholder="To YYYY-MM-DD" value={s.end} onChangeText={s.setEnd} /></View>
@@ -97,8 +137,9 @@ function FilterCard({ s }: { s: ReturnType<typeof useTxn> }) {
 
 function TxnForm({ s, kind, allocations, setAllocations }: {
   s: ReturnType<typeof useTxn>; kind: 'expenses' | 'incomes';
-  allocations: Array<{ farm_id: string; amount: string }>; setAllocations: (v: Array<{ farm_id: string; amount: string }>) => void;
+  allocations: AllocationDraft[]; setAllocations: (v: AllocationDraft[]) => void;
 }) {
+  const theme = useColors();
   return (
     <View>
       <AppInput label="Title" value={s.title} onChangeText={s.setTitle} icon="create-outline" />
@@ -107,7 +148,7 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
         <View style={{ flex: 1 }}><AppInput label="Date" value={s.date} onChangeText={s.setDate} icon="calendar-outline" /></View>
       </View>
       {kind === 'expenses' && (
-        <AppSelect label="Farm" placeholder="Select farm…" value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} allowClear={false} />
+        <AppSelect label="Farm" placeholder={t('farm_split_placeholder')} value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} />
       )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}>
@@ -127,6 +168,9 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <Chip label={s.doc === '' || s.doc === 'receipt' ? '🧾 Receipt' : '🧾 Invoice'} onPress={() => s.setDoc(s.doc === 'invoice' ? 'receipt' : 'invoice')} tone={theme.sage} />
         <Chip label={s.includeTax ? 'Tax ✓' : 'Tax ✕'} onPress={() => s.setIncludeTax(!s.includeTax)} tone={theme.sage} />
+        {kind === 'expenses' && (
+          <Chip label={s.isPaid ? `${t('paid')} ✓` : t('unpaid')} onPress={() => s.setIsPaid(!s.isPaid)} tone={s.isPaid ? theme.sage : theme.danger} />
+        )}
         <Chip label={s.isArchived ? `${t('archived')} ✓` : t('archived')} onPress={() => s.setIsArchived(!s.isArchived)} tone={theme.sage} />
       </View>
       {kind === 'incomes' && (
@@ -134,7 +178,7 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
           <Text style={{ fontWeight: '800', marginTop: 8, color: theme.ink }}>Farm allocations (optional)</Text>
           <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 4 }}>Split income across farms. Total cannot exceed the amount.</Text>
           {allocations.map((allocation, index) => (
-            <View key={index} style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginVertical: 6, backgroundColor: '#FAFAF6' }}>
+            <View key={index} style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginVertical: 6, backgroundColor: theme.surface }}>
               <AppSelect
                 label="Farm"
                 placeholder="Select farm…"
@@ -156,6 +200,7 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
 
 function TxnRow({ r, kind, onEdit, onArchive, onDelete }: { r: any; kind: 'expenses' | 'incomes'; onEdit: () => void; onArchive: () => void; onDelete: () => void }) {
   const isOut = kind === 'expenses';
+  const theme = useColors();
   return (
     <RowCard>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -164,13 +209,16 @@ function TxnRow({ r, kind, onEdit, onArchive, onDelete }: { r: any; kind: 'expen
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 14.5, fontWeight: '800', color: theme.ink }}>{r.title}</Text>
-          <Text style={{ fontSize: 12.5, color: theme.muted }}>{kind === 'expenses' ? r.farm_title : r.farm_summary || t('unallocated')} · {r.date}</Text>
+          <Text style={{ fontSize: 12.5, color: theme.muted }}>
+            {kind === 'expenses' ? (r.farm_title ?? t('all_farms_split')) : r.farm_summary || t('unallocated')} · {r.date}
+          </Text>
           <Text style={{ fontSize: 12, color: theme.muted }}>{r.category_name}{r.contact_name ? ` · ${r.contact_name}` : ''}</Text>
         </View>
         <Text style={{ fontWeight: '800', color: isOut ? theme.danger : theme.success }}>{isOut ? '−' : '+'}{fmt(r.amount)}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'center' }}>
         {r.is_archived ? <Badge label={t('archived')} tone="neutral" /> : null}
+        {kind === 'expenses' && !r.is_paid ? <Badge label={t('unpaid')} tone="amber" /> : null}
         {r.document_type ? <Badge label={r.document_type} tone="blue" /> : null}
         {(r.unallocated_amount ?? 0) > 0.000001 && <Badge label={`Unalloc ${fmt(r.unallocated_amount)}`} tone="amber" />}
       </View>
@@ -186,20 +234,23 @@ function TxnRow({ r, kind, onEdit, onArchive, onDelete }: { r: any; kind: 'expen
 export function ExpensesScreen() {
   const s = useTxn('expenses');
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
+  const unpaid = s.rows.reduce((a, r) => (r.is_paid ? a : a + Number(r.amount)), 0);
+  const theme = useColors();
 
   const resetForm = () => {
     s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
-    s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(false); s.setIsArchived(false); s.setEditingId(null);
+    s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(false); s.setIsPaid(true);
+    s.setIsArchived(false); s.setEditingId(null);
   };
 
   const submit = async () => {
     try {
-      if (!s.farmId || !s.categoryId) throw new Error('Pick a farm and a category first.');
+      if (!s.categoryId) throw new Error('Pick a category first.');
       const payload = {
-        farm_id: Number(s.farmId), category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
+        farm_id: s.farmId ? Number(s.farmId) : null, category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,
         document_type: (s.doc || 'receipt') as 'invoice' | 'receipt',
-        include_in_tax: s.includeTax, is_archived: s.isArchived,
+        include_in_tax: s.includeTax, is_paid: s.isPaid, is_archived: s.isArchived,
       };
       if (s.editingId) await updateExpense(s.editingId, payload);
       else await createExpense(payload);
@@ -213,17 +264,25 @@ export function ExpensesScreen() {
   const startEdit = (r: any) => {
     s.setEditingId(r.id);
     s.setTitle(r.title); s.setAmount(String(r.amount)); s.setDate(r.date);
-    s.setFarmId(String(r.farm_id)); s.setCategoryId(String(r.category_id));
+    s.setFarmId(r.farm_id == null ? '' : String(r.farm_id)); s.setCategoryId(String(r.category_id));
     s.setContactId(r.vendor_id ? String(r.vendor_id) : '');
     s.setDescription(r.description ?? ''); s.setDoc(r.document_type);
-    s.setIncludeTax(!!r.include_in_tax); s.setIsArchived(!!r.is_archived);
+    s.setIncludeTax(!!r.include_in_tax); s.setIsPaid(!!r.is_paid); s.setIsArchived(!!r.is_archived);
   };
 
   return (
     <View style={{ flex: 1 }}>
       <Screen title={t('expenses')} subtitle="EVERY INVESTMENT IN YOUR FARM">
-        <FilterCard s={s} />
-        <SectionTitle title={`Total ${fmt(total)}`} action={<AppButton title="Export" variant="ghost" onPress={() => exportAndShare('expenses', s.rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />} />
+        <FilterCard s={s} kind="expenses" />
+        <SectionTitle
+          title={`Total ${fmt(total)}`}
+          action={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {unpaid > 0 ? <Badge label={`${t('unpaid')} ${fmt(unpaid)}`} tone="amber" /> : null}
+              <AppButton title="Export" variant="ghost" onPress={() => exportAndShare('expenses', s.rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />
+            </View>
+          }
+        />
         {s.rows.length === 0 && <EmptyState icon="trending-down-outline" title="No expenses" hint="Record seeds, fuel, labor and more." />}
         {s.rows.map((r) => (
           <TxnRow
@@ -248,8 +307,9 @@ export function ExpensesScreen() {
 
 export function IncomesScreen() {
   const s = useTxn('incomes');
-  const [allocations, setAllocations] = useState<Array<{ farm_id: string; amount: string }>>([]);
+  const [allocations, setAllocations] = useState<AllocationDraft[]>([]);
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
+  const theme = useColors();
 
   const resetForm = () => {
     s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
@@ -293,7 +353,7 @@ export function IncomesScreen() {
   return (
     <View style={{ flex: 1 }}>
       <Screen title={t('incomes')} subtitle="WHAT YOUR HARD WORK BRINGS IN">
-        <FilterCard s={s} />
+        <FilterCard s={s} kind="incomes" />
         <SectionTitle title={`Total ${fmt(total)}`} action={<AppButton title="Export" variant="ghost" onPress={() => exportAndShare('incomes', s.rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />} />
         {s.rows.length === 0 && <EmptyState icon="trending-up-outline" title="No income yet" hint="Record your first sale." />}
         {s.rows.map((r) => (

@@ -10,9 +10,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { theme, spacing } from './theme';
+import { spacing, useColors } from './theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Palette handling: module-level styles below are layout-only; styles that carry
+// colors are built inside the `useXStyles()` hooks (they shadow `theme` with the
+// reactive palette). Components that read `theme.*` inline declare
+// `const theme = useColors();` first — so a missing subscription is a compile error.
 
 // ---------- Button ----------
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -33,7 +38,7 @@ export function AppButton({
 }) {
   const scale = useSharedValue(1);
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-  const styles = btnStyles[variant];
+  const styles = useBtnStyles(variant);
   return (
     <AnimatedPressable
       accessibilityRole="button"
@@ -62,40 +67,55 @@ const btnBase = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderRadius: theme.radiusPill,
+    borderRadius: 999,
     paddingVertical: 13,
     paddingHorizontal: 18,
   },
   text: { fontSize: 15, fontWeight: '700' },
 });
 
-const btnStyles: Record<BtnVariant, { wrap: object; fg: { color: string } }> = {
-  primary: { wrap: { backgroundColor: theme.pine }, fg: { color: '#fff' } },
-  secondary: {
-    wrap: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: theme.borderStrong },
-    fg: { color: theme.pine },
-  },
-  ghost: { wrap: { backgroundColor: 'transparent' }, fg: { color: theme.pine } },
-  danger: { wrap: { backgroundColor: theme.danger }, fg: { color: '#fff' } },
-};
+function useBtnStyles(variant: BtnVariant) {
+  const theme = useColors();
+  return useMemo(() => {
+    const styles: Record<BtnVariant, { wrap: object; fg: { color: string } }> = {
+      primary: { wrap: { backgroundColor: theme.pine }, fg: { color: '#fff' } },
+      secondary: {
+        wrap: { backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.borderStrong },
+        fg: { color: theme.green },
+      },
+      ghost: { wrap: { backgroundColor: 'transparent' }, fg: { color: theme.green } },
+      danger: { wrap: { backgroundColor: theme.danger }, fg: { color: '#fff' } },
+    };
+    return styles[variant];
+  }, [theme, variant]);
+}
 
 // ---------- Card ----------
 export function Card({ children, style }: { children: React.ReactNode; style?: object }) {
+  const cardStyles = useCardStyles();
   return <View style={[cardStyles.card, style]}>{children}</View>;
 }
-const cardStyles = StyleSheet.create({
-  card: {
-    backgroundColor: theme.card,
-    borderRadius: theme.radius,
-    borderWidth: 1,
-    borderColor: theme.border,
-    padding: spacing.md,
-    ...theme.shadowSm,
-  },
-});
+function useCardStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        card: {
+          backgroundColor: theme.card,
+          borderRadius: theme.radius,
+          borderWidth: 1,
+          borderColor: theme.border,
+          padding: spacing.md,
+          ...theme.shadowSm,
+        },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Section title ----------
 export function SectionTitle({ title, action }: { title: string; action?: React.ReactNode }) {
+  const sTitle = useSectionStyles();
   return (
     <View style={sTitle.wrap}>
       <Text style={sTitle.text}>{title}</Text>
@@ -103,10 +123,17 @@ export function SectionTitle({ title, action }: { title: string; action?: React.
     </View>
   );
 }
-const sTitle = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 10 },
-  text: { fontSize: 17, fontWeight: '800', color: theme.ink, letterSpacing: -0.2 },
-});
+function useSectionStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        wrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 10 },
+        text: { fontSize: 17, fontWeight: '800', color: theme.ink, letterSpacing: -0.2 },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Input ----------
 export function AppInput({
@@ -115,9 +142,11 @@ export function AppInput({
   icon,
   ...props
 }: TextInputProps & { label?: string; error?: string; icon?: keyof typeof Ionicons.glyphMap }) {
+  const theme = useColors();
+  const inputStyles = useInputStyles();
   const focused = useSharedValue(0);
   const aStyle = useAnimatedStyle(() => ({
-    borderColor: focused.value ? theme.pine : theme.borderStrong,
+    borderColor: focused.value ? theme.green : theme.borderStrong,
     shadowOpacity: focused.value ? 0.12 : 0,
   }));
   return (
@@ -141,25 +170,34 @@ export function AppInput({
     </View>
   );
 }
-const inputStyles = StyleSheet.create({
-  label: { fontSize: 12, fontWeight: '700', color: theme.inkSoft, marginBottom: 6, letterSpacing: 0.2 },
-  box: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderRadius: theme.radiusSm,
-    paddingHorizontal: 13,
-    paddingVertical: 4,
-    minHeight: 48,
-  },
-  field: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 10 },
-  error: { fontSize: 12, color: theme.danger, marginTop: 4, fontWeight: '600' },
-});
+function useInputStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        label: { fontSize: 12, fontWeight: '700', color: theme.inkSoft, marginBottom: 6, letterSpacing: 0.2 },
+        box: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          backgroundColor: theme.surface,
+          borderWidth: 1.5,
+          borderRadius: theme.radiusSm,
+          paddingHorizontal: 13,
+          paddingVertical: 4,
+          minHeight: 48,
+        },
+        field: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 10 },
+        error: { fontSize: 12, color: theme.danger, marginTop: 4, fontWeight: '600' },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Search ----------
 export function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const theme = useColors();
+  const searchStyles = useSearchStyles();
   return (
     <View style={searchStyles.box}>
       <Ionicons name="search" size={17} color={theme.muted} />
@@ -178,24 +216,33 @@ export function SearchBar({ value, onChange, placeholder }: { value: string; onC
     </View>
   );
 }
-const searchStyles = StyleSheet.create({
-  box: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: theme.radiusPill,
-    paddingHorizontal: 14,
-    minHeight: 46,
-    marginBottom: 10,
-  },
-  field: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 10 },
-});
+function useSearchStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        box: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.border,
+          borderRadius: theme.radiusPill,
+          paddingHorizontal: 14,
+          minHeight: 46,
+          marginBottom: 10,
+        },
+        field: { flex: 1, fontSize: 15, color: theme.ink, paddingVertical: 10 },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Chip / Badge ----------
 export function Chip({ label, active, onPress, tone }: { label: string; active?: boolean; onPress?: () => void; tone?: string }) {
+  const theme = useColors();
+  const chipStyles = useChipStyles();
   return (
     <Pressable
       onPress={() => {
@@ -211,23 +258,31 @@ export function Chip({ label, active, onPress, tone }: { label: string; active?:
     </Pressable>
   );
 }
-const chipStyles = StyleSheet.create({
-  base: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: theme.borderStrong,
-    borderRadius: theme.radiusPill,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  text: { fontSize: 13, fontWeight: '700', color: theme.inkSoft },
-});
+function useChipStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        base: {
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.borderStrong,
+          borderRadius: theme.radiusPill,
+          paddingHorizontal: 13,
+          paddingVertical: 8,
+          marginRight: 8,
+          marginBottom: 8,
+        },
+        text: { fontSize: 13, fontWeight: '700', color: theme.inkSoft },
+      }),
+    [theme],
+  );
+}
 
 export function Badge({ label, tone = 'neutral' }: { label: string; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) {
+  const theme = useColors();
   const bg: Record<string, string> = {
-    neutral: '#EFF1EA',
+    neutral: theme.neutralSoft,
     green: theme.successSoft,
     amber: theme.accentSoft,
     red: theme.dangerSoft,
@@ -236,7 +291,7 @@ export function Badge({ label, tone = 'neutral' }: { label: string; tone?: 'neut
   const fg: Record<string, string> = {
     neutral: theme.inkSoft,
     green: theme.success,
-    amber: '#8A5E12',
+    amber: theme.accentText,
     red: theme.danger,
     blue: theme.info,
   };
@@ -269,6 +324,8 @@ const avatarStyles = StyleSheet.create({
 
 // ---------- Row card ----------
 export function RowCard({ children, onPress }: { children: React.ReactNode; onPress?: () => void }) {
+  const theme = useColors();
+  const rowStyles = useRowStyles();
   const scale = useSharedValue(1);
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const inner = (
@@ -292,51 +349,69 @@ export function RowCard({ children, onPress }: { children: React.ReactNode; onPr
     </Pressable>
   );
 }
-const rowStyles = StyleSheet.create({
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: theme.radiusSm,
-    padding: 13,
-    marginBottom: 9,
-    ...theme.shadowSm,
-  },
-});
+function useRowStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        card: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.border,
+          borderRadius: theme.radiusSm,
+          padding: 13,
+          marginBottom: 9,
+          ...theme.shadowSm,
+        },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Empty / Skeleton ----------
 export function EmptyState({ icon = 'leaf-outline', title, hint }: { icon?: keyof typeof Ionicons.glyphMap; title: string; hint?: string }) {
+  const theme = useColors();
+  const emptyStyles = useEmptyStyles();
   return (
     <View style={emptyStyles.wrap}>
       <View style={emptyStyles.iconWrap}>
-        <Ionicons name={icon} size={26} color={theme.moss} />
+        <Ionicons name={icon} size={26} color={theme.green} />
       </View>
       <Text style={emptyStyles.title}>{title}</Text>
       {hint ? <Text style={emptyStyles.hint}>{hint}</Text> : null}
     </View>
   );
 }
-const emptyStyles = StyleSheet.create({
-  wrap: { alignItems: 'center', padding: 26, backgroundColor: '#fff', borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed' },
-  iconWrap: { width: 52, height: 52, borderRadius: 26, backgroundColor: theme.sage, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  title: { fontSize: 15, fontWeight: '800', color: theme.ink },
-  hint: { fontSize: 13, color: theme.muted, marginTop: 4, textAlign: 'center' },
-});
+function useEmptyStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        wrap: { alignItems: 'center', padding: 26, backgroundColor: theme.surface, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed' },
+        iconWrap: { width: 52, height: 52, borderRadius: 26, backgroundColor: theme.sage, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+        title: { fontSize: 15, fontWeight: '800', color: theme.ink },
+        hint: { fontSize: 13, color: theme.muted, marginTop: 4, textAlign: 'center' },
+      }),
+    [theme],
+  );
+}
 
 export function Skeleton({ height = 74 }: { height?: number }) {
+  const theme = useColors();
   const opacity = useSharedValue(0.45);
   useEffect(() => {
     opacity.value = withRepeat(withSequence(withTiming(1, { duration: 800 }), withTiming(0.45, { duration: 800 })), -1, true);
   }, [opacity]);
   const aStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return <Animated.View style={[{ height, backgroundColor: '#E9EDE4', borderRadius: theme.radiusSm, marginBottom: 9 }, aStyle]} />;
+  return <Animated.View style={[{ height, backgroundColor: theme.surfaceAlt, borderRadius: theme.radiusSm, marginBottom: 9 }, aStyle]} />;
 }
 
 // ---------- Segmented tabs ----------
 export function SegmentedTabs<T extends string>({ options, value, onChange }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+  const segStyles = useSegStyles();
   return (
     <View style={segStyles.wrap}>
       {options.map((o) => {
@@ -357,13 +432,20 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: { 
     </View>
   );
 }
-const segStyles = StyleSheet.create({
-  wrap: { flexDirection: 'row', backgroundColor: '#E9EDE4', borderRadius: 999, padding: 4, gap: 4, marginBottom: 12 },
-  btn: { flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center' },
-  active: { backgroundColor: '#fff', ...theme.shadowSm },
-  text: { fontSize: 12.5, fontWeight: '700', color: theme.muted },
-  activeText: { color: theme.pine },
-});
+function useSegStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        wrap: { flexDirection: 'row', backgroundColor: theme.surfaceAlt, borderRadius: 999, padding: 4, gap: 4, marginBottom: 12 },
+        btn: { flex: 1, borderRadius: 999, paddingVertical: 9, alignItems: 'center' },
+        active: { backgroundColor: theme.surface, ...theme.shadowSm },
+        text: { fontSize: 12.5, fontWeight: '700', color: theme.muted },
+        activeText: { color: theme.green },
+      }),
+    [theme],
+  );
+}
 
 // ---------- Select (pure-JS dropdown, port of web <select> fields) ----------
 export interface SelectOption {
@@ -389,6 +471,8 @@ export function AppSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const theme = useColors();
+  const inputStyles = useInputStyles();
   const selected = useMemo(() => options.find((o) => String(o.id) === String(value ?? '')), [options, value]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -428,7 +512,7 @@ export function AppSelect({
                   if (String(item.id) === '__clear__') onChange(null);
                   else onChange(item.id, item);
                 }}
-                style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 13, marginBottom: 8 }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 13, marginBottom: 8 }}
               >
                 <Text style={{ fontSize: 15, fontWeight: '700', color: theme.ink }}>{item.label}</Text>
                 {item.sub ? <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{item.sub}</Text> : null}
@@ -444,6 +528,7 @@ export function AppSelect({
 
 // ---------- FAB ----------
 export function FAB({ icon = 'add', onPress, label }: { icon?: keyof typeof Ionicons.glyphMap; onPress: () => void; label?: string }) {
+  const fabStyles = useFabStyles();
   const scale = useSharedValue(1);
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
@@ -465,19 +550,26 @@ export function FAB({ icon = 'add', onPress, label }: { icon?: keyof typeof Ioni
     </AnimatedPressable>
   );
 }
-const fabStyles = StyleSheet.create({
-  base: {
-    position: 'absolute',
-    right: 18,
-    bottom: 26,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: theme.pine,
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    ...theme.shadow,
-  },
-  label: { color: '#fff', fontWeight: '800', fontSize: 14 },
-});
+function useFabStyles() {
+  const theme = useColors();
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        base: {
+          position: 'absolute',
+          right: 18,
+          bottom: 26,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          backgroundColor: theme.pine,
+          borderRadius: 999,
+          paddingHorizontal: 18,
+          paddingVertical: 15,
+          ...theme.shadow,
+        },
+        label: { color: '#fff', fontWeight: '800', fontSize: 14 },
+      }),
+    [theme],
+  );
+}

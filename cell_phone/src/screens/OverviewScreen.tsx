@@ -7,7 +7,7 @@ import type { FinancialSummary } from '../db/types';
 import { HeroBalance, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { AppButton, Card, EmptyState, RowCard, SectionTitle, Skeleton } from '../components/ui';
-import { fmt, theme } from '../components/theme';
+import { fmt, useColors } from '../components/theme';
 import { localizeMonthLabel, t } from '../lib/i18n';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
@@ -15,6 +15,7 @@ export function OverviewScreen({ navigation }: any) {
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [recent, setRecent] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const theme = useColors();
 
   useFocusEffect(
     useCallback(() => {
@@ -79,7 +80,7 @@ export function OverviewScreen({ navigation }: any) {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14.5, fontWeight: '700', color: theme.ink }}>{r.title}</Text>
                       <Text style={{ fontSize: 12.5, color: theme.muted }}>
-                        {(isOut ? r.farm_title : (r.farm_summary || t('unallocated')))} · {r.date}
+                        {(isOut ? (r.farm_title ?? t('all_farms_split')) : (r.farm_summary || t('unallocated')))} · {r.date}
                       </Text>
                     </View>
                     <Text style={{ fontSize: 14.5, fontWeight: '800', color: isOut ? theme.danger : theme.success }}>

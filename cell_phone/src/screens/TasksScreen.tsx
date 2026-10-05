@@ -9,7 +9,7 @@ import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
 import { t } from '../lib/i18n';
 import { AppButton, AppInput, AppSelect, Badge, Card, Chip, EmptyState, RowCard, SearchBar, SectionTitle, type SelectOption } from '../components/ui';
-import { theme } from '../components/theme';
+import { useColors } from '../components/theme';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 export function TasksScreen() {
@@ -30,6 +30,7 @@ export function TasksScreen() {
   const [catOpts, setCatOpts] = useState<SelectOption[]>([]);
   const [plantingOpts, setPlantingOpts] = useState<SelectOption[]>([]);
   const [expenseOpts, setExpenseOpts] = useState<SelectOption[]>([]);
+  const theme = useColors();
 
   const refresh = useCallback(async () => {
     setRows(await listTasks({
@@ -134,7 +135,7 @@ export function TasksScreen() {
             <AppSelect label="Category" placeholder="Select category…" value={categoryId || null} options={catOpts} onChange={(id) => setCategoryId(id == null ? '' : String(id))} allowClear={false} />
             <AppSelect label="Tree group (optional)" placeholder="Whole farm" value={plantingId || null} options={plantingOpts} onChange={(id) => setPlantingId(id == null ? '' : String(id))} />
             <AppSelect label="Linked expense (optional)" placeholder="No expense" value={expenseId || null} options={expenseOpts} onChange={(id) => setExpenseId(id == null ? '' : String(id))} />
-            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>Tree group and expense must belong to the selected farm. Only active expenses can be newly linked.</Text>
+            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>Tree group must belong to the selected farm; linked expenses may belong to that farm or be shared (all farms). Only active expenses can be newly linked.</Text>
             <AppInput label="Title" placeholder="e.g. Pruning" value={title} onChangeText={setTitle} icon="create-outline" />
             <AppInput label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
             <AppInput label="Date" placeholder="YYYY-MM-DD" value={date} onChangeText={setDate} icon="calendar-outline" />
