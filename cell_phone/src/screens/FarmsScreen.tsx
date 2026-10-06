@@ -5,7 +5,7 @@ import { createFarm, deleteFarm, listFarms, updateFarm } from '../db/repositorie
 import type { Farm } from '../db/types';
 import { Screen } from './Screen';
 import { todayISODate } from '../db/types';
-import { t } from '../lib/i18n';
+import { isGreek, t } from '../lib/i18n';
 import { AppButton, AppInput, AvatarDot, Badge, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
 import { useColors } from '../components/theme';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
@@ -48,7 +48,7 @@ export function FarmsScreen() {
               <AvatarDot name={f.title} />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: theme.ink }}>{f.title}</Text>
-                <Text style={{ fontSize: 12.5, color: theme.muted }}>{f.size} ha · 🌳 {f.tree_total ?? 0} trees</Text>
+                <Text style={{ fontSize: 12.5, color: theme.muted }}>{f.size} {isGreek() ? 'στρ.' : 'str.'} · 🌳 {f.tree_total ?? 0} trees</Text>
               </View>
               <Badge label={f.active ? t('active') : 'off'} tone={f.active ? 'green' : 'neutral'} />
             </View>
@@ -71,7 +71,7 @@ export function FarmsScreen() {
           <Card style={{ marginTop: 14 }}>
             <Text style={{ fontSize: 16, fontWeight: '800', color: theme.ink, marginBottom: 10 }}>{editingId ? 'Edit farm' : 'Add farm'}</Text>
             <AppInput label="Title" placeholder="e.g. Olive grove" value={title} onChangeText={setTitle} icon="leaf-outline" />
-            <AppInput label="Size (ha)" placeholder="2.5" value={size} onChangeText={setSize} keyboardType="decimal-pad" icon="expand-outline" />
+            <AppInput label={isGreek() ? 'Μέγεθος (στρέμματα)' : 'Size (stremmata)'} placeholder="2.5" value={size} onChangeText={setSize} keyboardType="decimal-pad" icon="expand-outline" />
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 6 }}>
               <Text style={{ fontWeight: '700', color: theme.ink }}>{t('active')}</Text>
               <Switch value={active} onValueChange={setActive} trackColor={{ true: theme.pine }} />

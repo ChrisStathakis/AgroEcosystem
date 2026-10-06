@@ -17,6 +17,18 @@ export function assertPositiveSize(size: number): void {
   if (!Number.isFinite(size) || size <= 0) throw new Error(msg('Enter a size greater than zero.', 'Εισαγάγετε μέγεθος μεγαλύτερο από μηδέν.'));
 }
 
+export function assertHarvestYear(year: number): void {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error(msg('Enter a year between 2000 and 2100.', 'Εισαγάγετε έτος από 2000 έως 2100.'));
+}
+
+export function assertQuantity(quantity: number): void {
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(msg('Enter a quantity greater than zero.', 'Εισαγάγετε ποσότητα μεγαλύτερη από μηδέν.'));
+}
+
+export function assertProductionUnit(unit: string): void {
+  if (unit !== 'kg' && unit !== 'tn' && unit !== 'l') throw new Error(msg('Choose a valid unit (kg, tn, l).', 'Επιλέξτε έγκυρη μονάδα (kg, tn, l).'));
+}
+
 export function assertPositiveCount(count: number): void {
   if (!Number.isInteger(count) || count <= 0) throw new Error(msg('Enter a number of trees greater than zero.', 'Εισαγάγετε αριθμό δέντρων μεγαλύτερο από μηδέν.'));
 }

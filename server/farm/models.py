@@ -18,7 +18,7 @@ class Farm(models.Model):
     size = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text="Farm size in hectares.",
+        help_text="Farm size in stremmata.",
     )
     active = models.BooleanField(default=True, help_text="Whether this farm is currently active.")
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the farm was created.")

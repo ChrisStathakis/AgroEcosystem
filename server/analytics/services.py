@@ -114,8 +114,9 @@ def _apply_common(qs, filters, *, category_attr, contact_attr, farm_attr):
             qs = qs.filter(allocations__farm=farm).distinct()
         elif farm_attr == "farm":
             # Shared expenses (no farm) apply to every farm, so include them
-            # whenever a farm filter is active. Totals are split by tree
-            # count via the helpers below instead of counting the full row.
+            # whenever a farm filter is active. Totals are split by each
+            # expense's basis via the helpers below instead of counting
+            # the full row.
             from django.db.models import Q
             qs = qs.filter(Q(farm=farm) | Q(farm__isnull=True))
         else:
@@ -143,6 +144,54 @@ def farm_tree_weights(profile) -> tuple[dict, int]:
     return weights, sum(weights.values())
 
 
+def _basis_cache_key(basis, tree_type_id):
+    return (basis or "trees", tree_type_id)
+
+
+def _basis_weights_cached(profile, basis, tree_type_id, cache):
+    """Weight map + total for one split basis, memoized per request."""
+    from expenses import models as expense_models
+
+    key = _basis_cache_key(basis, tree_type_id)
+    if cache is not None and key in cache:
+        return cache[key]
+    if basis == "area":
+        result = expense_models.farm_area_weights(profile)
+    elif basis == "tree_type" and tree_type_id:
+        result = expense_models.farm_tree_type_weights(profile, tree_type_id)
+    elif basis == "equal":
+        result = expense_models.basis_weights(profile, "equal")
+    else:
+        result = expense_models.farm_tree_weights(profile)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _basis_ratio(profile, farm, basis, tree_type_id, cache=None) -> Decimal:
+    """Portion of one shared-expense group attributable to ``farm``."""
+    from farm.models import Farm as FarmModel
+
+    weights, total = _basis_weights_cached(profile, basis, tree_type_id, cache)
+    farm_id = farm.pk if isinstance(farm, FarmModel) else getattr(farm, "pk", farm)
+    if not weights or farm_id not in weights:
+        return Decimal("0")
+    total = Decimal(str(total or 0))
+    if total > 0:
+        return Decimal(str(weights.get(farm_id, 0))) / total
+    active = len(weights)
+    if not active:
+        return Decimal("0")
+    return Decimal("1") / Decimal(str(active))
+
+
+def _shared_groups(shared_qs):
+    """Shared-expense totals grouped by (split_basis, split_tree_type)."""
+    return list(
+        shared_qs.order_by().values("split_basis", "split_tree_type").annotate(total=Sum("amount"))
+    )
+
+
 def farm_share_ratio(profile, farm, weights=None, total=None) -> Decimal:
     """Portion of a shared expense attributable to ``farm``.
 
@@ -165,7 +214,7 @@ def farm_share_ratio(profile, farm, weights=None, total=None) -> Decimal:
 
 
 def _split_aware_expense_total(expenses_qs, profile, farm) -> Decimal:
-    """Total of ``expenses_qs`` with shared rows split by tree count.
+    """Total of ``expenses_qs`` with shared rows split by their own basis.
 
     ``expenses_qs`` must already carry every non-farm filter (dates,
     category, vendor, document, tax) and, when ``farm`` is set, include
@@ -174,16 +223,22 @@ def _split_aware_expense_total(expenses_qs, profile, farm) -> Decimal:
     if not farm:
         return expenses_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
     direct = expenses_qs.filter(farm=farm).aggregate(total=Sum("amount"))["total"] or Decimal("0")
-    shared = expenses_qs.filter(farm__isnull=True).aggregate(total=Sum("amount"))["total"] or Decimal("0")
-    if not shared:
-        return direct
-    return direct + shared * farm_share_ratio(profile, farm)
+    cache: dict = {}
+    shared_total = Decimal("0")
+    for group in _shared_groups(expenses_qs.filter(farm__isnull=True)):
+        group_total = group["total"] or Decimal("0")
+        if not group_total:
+            continue
+        ratio = _basis_ratio(profile, farm, group.get("split_basis"), group.get("split_tree_type"), cache)
+        shared_total += group_total * ratio
+    return direct + shared_total
 
 
 def _split_aware_monthly_expenses(expenses_qs, profile, farm):
-    """Per-month expense sums with shared rows split by tree count."""
+    """Per-month expense sums with shared rows split by their own basis."""
     rows = list(
-        expenses_qs.order_by().annotate(month=TruncMonth("date")).values("month", "farm").annotate(total=Sum("amount"))
+        expenses_qs.order_by().annotate(month=TruncMonth("date")).values(
+            "month", "farm", "split_basis", "split_tree_type").annotate(total=Sum("amount"))
     )
     if not farm:
         merged = {}
@@ -191,32 +246,47 @@ def _split_aware_monthly_expenses(expenses_qs, profile, farm):
             key = row["month"].month + row["month"].year * 12
             merged[key] = merged.get(key, Decimal("0")) + (row["total"] or Decimal("0"))
         return merged
-    ratio = farm_share_ratio(profile, farm)
+    cache: dict = {}
+    ratios: dict = {}
     merged = {}
     for row in rows:
         key = row["month"].month + row["month"].year * 12
         total = row["total"] or Decimal("0")
-        merged[key] = merged.get(key, Decimal("0")) + (total if row["farm"] else total * ratio)
+        if row["farm"]:
+            merged[key] = merged.get(key, Decimal("0")) + total
+            continue
+        group_key = (row.get("split_basis"), row.get("split_tree_type"))
+        if group_key not in ratios:
+            ratios[group_key] = _basis_ratio(profile, farm, group_key[0], group_key[1], cache)
+        merged[key] = merged.get(key, Decimal("0")) + total * ratios[group_key]
     return merged
 
 
 def _split_aware_category_totals(expenses_qs, profile, farm, category_attr="category", limit=8):
-    """Category totals with shared rows split by tree count."""
+    """Category totals with shared rows split by their own basis."""
     from collections import defaultdict
 
     rows = list(
-        expenses_qs.order_by().values(f"{category_attr}__name", "farm").annotate(total=Sum("amount"))
+        expenses_qs.order_by().values(
+            f"{category_attr}__name", "farm", "split_basis", "split_tree_type").annotate(total=Sum("amount"))
     )
     if not farm:
         merged = defaultdict(lambda: Decimal("0"))
         for row in rows:
             merged[row[f"{category_attr}__name"] or "—"] += row["total"] or Decimal("0")
     else:
-        ratio = farm_share_ratio(profile, farm)
+        cache: dict = {}
+        ratios: dict = {}
         merged = defaultdict(lambda: Decimal("0"))
         for row in rows:
             total = row["total"] or Decimal("0")
-            merged[row[f"{category_attr}__name"] or "—"] += total if row["farm"] else total * ratio
+            if row["farm"]:
+                merged[row[f"{category_attr}__name"] or "—"] += total
+                continue
+            group_key = (row.get("split_basis"), row.get("split_tree_type"))
+            if group_key not in ratios:
+                ratios[group_key] = _basis_ratio(profile, farm, group_key[0], group_key[1], cache)
+            merged[row[f"{category_attr}__name"] or "—"] += total * ratios[group_key]
     items = [{"label": label, "total": total} for label, total in merged.items()]
     items.sort(key=lambda item: item["total"], reverse=True)
     if len(items) > limit:
@@ -348,10 +418,11 @@ def farm_profit(profile, year=None, filters=None) -> dict:
     if f.get("farm"):
         farms_qs = farms_qs.filter(pk=f["farm"].pk)
     farms = list(farms_qs)
-    weights, total_trees = farm_tree_weights(profile)
-    # Shared expenses matching every non-farm filter, split by tree count.
+    # Shared expenses matching every non-farm filter, grouped by split basis.
     shared_base = filter_expenses(profile, {**f, "farm": None}).filter(farm__isnull=True)
-    shared_total = shared_base.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    shared_groups = _shared_groups(shared_base)
+    shared_total = sum((g["total"] or Decimal("0") for g in shared_groups), Decimal("0"))
+    cache: dict = {}
     rows = []
     for farm in farms:
         sub = dict(f)
@@ -375,7 +446,12 @@ def farm_profit(profile, year=None, filters=None) -> dict:
         income_total = alloc_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
         direct_expense = (filter_expenses(profile, {**sub, "farm": None}).filter(farm=farm)
                           .aggregate(total=Sum("amount"))["total"] or Decimal("0"))
-        expense_total = direct_expense + shared_total * farm_share_ratio(profile, farm, weights, total_trees)
+        shared_expense = sum(
+            ((g["total"] or Decimal("0"))
+             * _basis_ratio(profile, farm, g.get("split_basis"), g.get("split_tree_type"), cache)
+             for g in shared_groups),
+            Decimal("0"))
+        expense_total = direct_expense + shared_expense
         rows.append({"farm": farm.title, "income": income_total, "expense": expense_total,
                      "net": income_total - expense_total})
     if not f.get("farm"):
@@ -481,8 +557,13 @@ def tax_report(profile, filters=None) -> dict:
     farm = taxed.get("farm")
     if farm:
         direct = sum((e.amount for e in expenses if e.farm_id), Decimal("0"))
-        shared = sum((e.amount for e in expenses if e.farm_id is None), Decimal("0"))
-        expense_total = direct + shared * farm_share_ratio(profile, farm)
+        cache: dict = {}
+        shared = Decimal("0")
+        for e in expenses:
+            if e.farm_id is None:
+                shared += e.amount * _basis_ratio(
+                    profile, farm, e.split_basis, e.split_tree_type_id, cache)
+        expense_total = direct + shared
     else:
         expense_total = sum((e.amount for e in expenses), Decimal("0"))
     period = resolve_period(profile, _coerce_filters(profile, filters=f))
@@ -497,8 +578,8 @@ def obligations_report(profile, filters=None) -> dict:
     """Unpaid expenses: totals + per-farm split + line items.
 
     Payment status never affects tax figures; this report simply lists
-    what is still owed. Shared (farm-less) expenses split by tree count,
-    like every other per-farm figure.
+    what is still owed. Shared (farm-less) expenses split by their own
+    basis (trees, variety, area or equal), like every per-farm figure.
     """
     from farm.models import Farm
 
@@ -518,17 +599,26 @@ def obligations_report(profile, filters=None) -> dict:
     if farm:
         farms_qs = farms_qs.filter(pk=farm.pk)
     farms = list(farms_qs)
-    weights, total_trees = farm_tree_weights(profile)
-    shared_total = base.filter(farm__isnull=True).aggregate(total=Sum("amount"))["total"] or Decimal("0")
-    shared_overdue = overdue_qs.filter(farm__isnull=True).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    cache: dict = {}
+    shared_groups = _shared_groups(base.filter(farm__isnull=True))
+    shared_overdue_groups = _shared_groups(overdue_qs.filter(farm__isnull=True))
     rows = []
     for one in farms:
-        ratio = farm_share_ratio(profile, one, weights, total_trees)
         direct = base.filter(farm=one).aggregate(total=Sum("amount"))["total"] or Decimal("0")
         direct_overdue = overdue_qs.filter(farm=one).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+        shared = sum(
+            ((g["total"] or Decimal("0"))
+             * _basis_ratio(profile, one, g.get("split_basis"), g.get("split_tree_type"), cache)
+             for g in shared_groups),
+            Decimal("0"))
+        shared_over = sum(
+            ((g["total"] or Decimal("0"))
+             * _basis_ratio(profile, one, g.get("split_basis"), g.get("split_tree_type"), cache)
+             for g in shared_overdue_groups),
+            Decimal("0"))
         rows.append({"farm": one.title,
-                     "unpaid": direct + shared_total * ratio,
-                     "overdue": direct_overdue + shared_overdue * ratio})
+                     "unpaid": direct + shared,
+                     "overdue": direct_overdue + shared_over})
     rows.sort(key=lambda row: row["unpaid"], reverse=True)
     return {"filters": f, "period_label": period["label"],
             "start": period["start"], "end": period["end"], "year": period["year"],

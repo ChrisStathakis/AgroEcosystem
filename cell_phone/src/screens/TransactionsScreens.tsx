@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, Switch, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  createExpense, createIncome, deleteExpense, deleteIncome, listExpenses, listIncomes,
+  computeAutoSplit, createExpense, createIncome, deleteExpense, deleteIncome, listExpenses, listIncomes,
   listIncomeAllocations, setExpenseArchived, setIncomeArchived, updateExpense, updateIncome,
 } from '../db/repositories/transactions';
 import { listFarms } from '../db/repositories/farms';
@@ -135,9 +135,12 @@ function FilterCard({ s, kind }: { s: ReturnType<typeof useTxn>; kind: 'expenses
   );
 }
 
-function TxnForm({ s, kind, allocations, setAllocations }: {
+function TxnForm({ s, kind, allocations, setAllocations, splitBasis, setSplitBasis, splitTreeTypeId, setSplitTreeTypeId, treeTypeOpts }: {
   s: ReturnType<typeof useTxn>; kind: 'expenses' | 'incomes';
   allocations: AllocationDraft[]; setAllocations: (v: AllocationDraft[]) => void;
+  splitBasis?: string; setSplitBasis?: (v: 'trees' | 'tree_type' | 'area' | 'equal') => void;
+  splitTreeTypeId?: string; setSplitTreeTypeId?: (v: string) => void;
+  treeTypeOpts?: SelectOption[];
 }) {
   const theme = useColors();
   return (
@@ -149,6 +152,37 @@ function TxnForm({ s, kind, allocations, setAllocations }: {
       </View>
       {kind === 'expenses' && (
         <AppSelect label="Farm" placeholder={t('farm_split_placeholder')} value={s.farmId || null} options={s.farmOpts} onChange={(id) => s.setFarmId(id == null ? '' : String(id))} />
+      )}
+      {kind === 'expenses' && !s.farmId && setSplitBasis && (
+        <View style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginBottom: 8, backgroundColor: theme.surface }}>
+          <Text style={{ fontWeight: '800', marginBottom: 4, color: theme.ink }}>
+            {isGreek() ? 'Βάση επιμερισμού' : 'Split basis'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+            {([
+              ['trees', isGreek() ? 'Δέντρα' : 'Trees'],
+              ['tree_type', isGreek() ? 'Ποικιλία' : 'Variety'],
+              ['area', isGreek() ? 'Στρέμματα' : 'Area'],
+              ['equal', isGreek() ? 'Ίσα' : 'Equal'],
+            ] as const).map(([v, label]) => (
+              <Pressable key={v} onPress={() => setSplitBasis(v)}
+                style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                  backgroundColor: splitBasis === v ? theme.pine : theme.sage }}>
+                <Text style={{ color: splitBasis === v ? '#fff' : theme.ink, fontWeight: '700', fontSize: 12.5 }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {splitBasis === 'tree_type' && (
+            <AppSelect
+              label={isGreek() ? 'Δέντρο/Καλλιέργεια' : 'Tree/Crop'}
+              placeholder="Select…"
+              value={splitTreeTypeId || null}
+              options={treeTypeOpts ?? []}
+              onChange={(id) => setSplitTreeTypeId && setSplitTreeTypeId(id == null ? '' : String(id))}
+              allowClear={false}
+            />
+          )}
+        </View>
       )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}>
@@ -219,6 +253,7 @@ function TxnRow({ r, kind, onEdit, onArchive, onDelete }: { r: any; kind: 'expen
       <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'center' }}>
         {r.is_archived ? <Badge label={t('archived')} tone="neutral" /> : null}
         {kind === 'expenses' && !r.is_paid ? <Badge label={t('unpaid')} tone="amber" /> : null}
+        {kind === 'expenses' && r.farm_id == null ? <Badge label={isGreek() ? 'Κοινό' : 'Shared'} tone="blue" /> : null}
         {r.document_type ? <Badge label={r.document_type} tone="blue" /> : null}
         {(r.unallocated_amount ?? 0) > 0.000001 && <Badge label={`Unalloc ${fmt(r.unallocated_amount)}`} tone="amber" />}
       </View>
@@ -236,21 +271,31 @@ export function ExpensesScreen() {
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
   const unpaid = s.rows.reduce((a, r) => (r.is_paid ? a : a + Number(r.amount)), 0);
   const theme = useColors();
+  const [splitBasis, setSplitBasis] = useState<'trees' | 'tree_type' | 'area' | 'equal'>('trees');
+  const [splitTreeTypeId, setSplitTreeTypeId] = useState('');
+  const [treeTypeOpts, setTreeTypeOpts] = useState<SelectOption[]>([]);
+
+  useFocusEffect(useCallback(() => {
+    listLookups('tree_types').then((rows) => setTreeTypeOpts(rows.map((x) => ({ id: x.id, label: x.name })))).catch(() => {});
+  }, []));
 
   const resetForm = () => {
     s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
     s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(false); s.setIsPaid(true);
-    s.setIsArchived(false); s.setEditingId(null);
+    s.setIsArchived(false); s.setEditingId(null); s.setFarmId('');
+    setSplitBasis('trees'); setSplitTreeTypeId('');
   };
 
   const submit = async () => {
     try {
       if (!s.categoryId) throw new Error('Pick a category first.');
+      if (!s.farmId && splitBasis === 'tree_type' && !splitTreeTypeId) throw new Error('Choose a tree/crop for this split basis.');
       const payload = {
         farm_id: s.farmId ? Number(s.farmId) : null, category_id: Number(s.categoryId), contact_id: s.contactId ? Number(s.contactId) : null,
         title: s.title, description: s.description, amount: Number(s.amount), date: s.date,
         document_type: (s.doc || 'receipt') as 'invoice' | 'receipt',
         include_in_tax: s.includeTax, is_paid: s.isPaid, is_archived: s.isArchived,
+        split_basis: splitBasis, split_tree_type_id: splitTreeTypeId ? Number(splitTreeTypeId) : null,
       };
       if (s.editingId) await updateExpense(s.editingId, payload);
       else await createExpense(payload);
@@ -268,6 +313,7 @@ export function ExpensesScreen() {
     s.setContactId(r.vendor_id ? String(r.vendor_id) : '');
     s.setDescription(r.description ?? ''); s.setDoc(r.document_type);
     s.setIncludeTax(!!r.include_in_tax); s.setIsPaid(!!r.is_paid); s.setIsArchived(!!r.is_archived);
+    setSplitBasis(r.split_basis ?? 'trees'); setSplitTreeTypeId(r.split_tree_type_id ? String(r.split_tree_type_id) : '');
   };
 
   return (
@@ -294,7 +340,7 @@ export function ExpensesScreen() {
         ))}
         <Card style={{ marginTop: 12 }}>
           <Text style={{ fontWeight: '800', fontSize: 16, color: theme.ink, marginBottom: 8 }}>{s.editingId ? 'Edit expense' : 'Add expense'}</Text>
-          <TxnForm s={s} kind="expenses" allocations={[]} setAllocations={() => {}} />
+          <TxnForm s={s} kind="expenses" allocations={[]} setAllocations={() => {}} splitBasis={splitBasis} setSplitBasis={setSplitBasis} splitTreeTypeId={splitTreeTypeId} setSplitTreeTypeId={setSplitTreeTypeId} treeTypeOpts={treeTypeOpts} />
           <AppButton title={s.editingId ? 'Save' : 'Create'} icon="checkmark-circle" onPress={submit} />
           {s.editingId ? <View style={{ height: 8 }} /> : null}
           {s.editingId ? <AppButton title="Cancel" variant="ghost" onPress={resetForm} /> : null}
@@ -308,13 +354,29 @@ export function ExpensesScreen() {
 export function IncomesScreen() {
   const s = useTxn('incomes');
   const [allocations, setAllocations] = useState<AllocationDraft[]>([]);
+  const [autoBasis, setAutoBasis] = useState<'trees' | 'tree_type' | 'area' | 'equal'>('trees');
+  const [autoTreeTypeId, setAutoTreeTypeId] = useState('');
+  const [treeTypeOpts, setTreeTypeOpts] = useState<SelectOption[]>([]);
   const total = s.rows.reduce((a, r) => a + Number(r.amount), 0);
   const theme = useColors();
+
+  useFocusEffect(useCallback(() => {
+    listLookups('tree_types').then((rows) => setTreeTypeOpts(rows.map((x) => ({ id: x.id, label: x.name })))).catch(() => {});
+  }, []));
+
+  const autoSplit = async () => {
+    try {
+      const shares = await computeAutoSplit(autoBasis, autoTreeTypeId ? Number(autoTreeTypeId) : null, Number(s.amount));
+      setAllocations(shares.map((x) => ({ farm_id: String(x.farm_id), amount: String(x.amount) })));
+    } catch (e: any) {
+      Alert.alert('Invalid', e.message);
+    }
+  };
 
   const resetForm = () => {
     s.setTitle(''); s.setAmount(''); s.setDescription(''); s.setContactId('');
     s.setCategoryId(''); s.setDate(todayISODate()); s.setIncludeTax(true); s.setIsArchived(false); s.setEditingId(null);
-    setAllocations([]);
+    setAllocations([]); setAutoBasis('trees'); setAutoTreeTypeId('');
   };
 
   const submit = async () => {
@@ -367,6 +429,36 @@ export function IncomesScreen() {
         <Card style={{ marginTop: 12 }}>
           <Text style={{ fontWeight: '800', fontSize: 16, color: theme.ink, marginBottom: 8 }}>{s.editingId ? 'Edit income' : 'Add income'}</Text>
           <TxnForm s={s} kind="incomes" allocations={allocations} setAllocations={setAllocations} />
+          <View style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 14, padding: 8, marginBottom: 8, backgroundColor: theme.surface }}>
+            <Text style={{ fontWeight: '800', marginBottom: 4, color: theme.ink }}>
+              {isGreek() ? 'Αυτόματη κατανομή' : 'Auto split'}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+              {([
+                ['trees', isGreek() ? 'Δέντρα' : 'Trees'],
+                ['tree_type', isGreek() ? 'Ποικιλία' : 'Variety'],
+                ['area', isGreek() ? 'Στρέμματα' : 'Area'],
+                ['equal', isGreek() ? 'Ίσα' : 'Equal'],
+              ] as const).map(([v, label]) => (
+                <Pressable key={v} onPress={() => setAutoBasis(v)}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                    backgroundColor: autoBasis === v ? theme.pine : theme.sage }}>
+                  <Text style={{ color: autoBasis === v ? '#fff' : theme.ink, fontWeight: '700', fontSize: 12.5 }}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {autoBasis === 'tree_type' && (
+              <AppSelect
+                label={isGreek() ? 'Δέντρο/Καλλιέργεια' : 'Tree/Crop'}
+                placeholder="Select…"
+                value={autoTreeTypeId || null}
+                options={treeTypeOpts}
+                onChange={(id) => setAutoTreeTypeId(id == null ? '' : String(id))}
+                allowClear={false}
+              />
+            )}
+            <AppButton title={isGreek() ? 'Συμπλήρωση κατανομών' : 'Fill allocations'} variant="secondary" icon="calculator" onPress={autoSplit} />
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 6 }}>
             <Text style={{ fontWeight: '700', color: theme.ink }}>Tax</Text>
             <Switch value={s.includeTax} onValueChange={s.setIncludeTax} trackColor={{ true: theme.pine }} />

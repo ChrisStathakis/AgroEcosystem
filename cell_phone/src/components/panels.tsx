@@ -72,13 +72,13 @@ export function Stats({ income, expense, balance }: { income: number; expense: n
   return (
     <View style={styles.row}>
       <StatCard label="Income" value={income} icon="trending-up" tint={theme.success} bg={theme.successSoft} delay={0} />
-      <StatCard label="Expenses" value={expense} icon="trending-down" tint={theme.accentText} bg={theme.accentSoft} delay={90} />
+      <StatCard label="Expenses" value={expense} icon="trending-down" tint={theme.danger} bg={theme.dangerSoft} delay={90} />
       <StatCard
         label="Balance"
         value={balance}
         icon="wallet"
         tint={balance < 0 ? theme.danger : theme.success}
-        bg={balance < 0 ? theme.dangerSoft : theme.sage}
+        bg={balance < 0 ? theme.dangerSoft : theme.successSoft}
         delay={180}
       />
     </View>
@@ -138,7 +138,7 @@ export function MiniBars({ items, format }: { items: Array<{ label: string; valu
         <View key={item.label}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ fontWeight: '700', color: theme.ink, fontSize: 13, flex: 1 }} numberOfLines={1}>{item.label}</Text>
-            <Text style={{ fontWeight: '800', color: item.tone === 'red' ? theme.danger : theme.ink, fontSize: 13 }}>{fmtFn(item.value)}</Text>
+            <Text style={{ fontWeight: '800', color: item.tone === 'red' ? theme.danger : item.tone === 'green' ? theme.success : theme.ink, fontSize: 13 }}>{fmtFn(item.value)}</Text>
           </View>
           <View style={{ height: 8, borderRadius: 5, backgroundColor: theme.neutralSoft, marginTop: 5, overflow: 'hidden' }}>
             <View
@@ -146,7 +146,7 @@ export function MiniBars({ items, format }: { items: Array<{ label: string; valu
                 height: 8,
                 borderRadius: 5,
                 width: `${Math.max(4, (Math.abs(item.value) / max) * 100)}%`,
-                backgroundColor: item.tone === 'red' ? theme.danger : item.tone === 'neutral' ? theme.muted : theme.pine,
+                backgroundColor: item.tone === 'red' ? theme.danger : item.tone === 'neutral' ? theme.muted : theme.success,
               }}
             />
           </View>
@@ -177,14 +177,14 @@ function useChartStyles() {
   );
 }
 
-export function CategoryBars({ title, items }: { title: string; items: Array<{ label: string; total: number }> }) {
+export function CategoryBars({ title, items, tone }: { title: string; items: Array<{ label: string; total: number }>; tone?: 'green' | 'red' }) {
   const chartStyles = useChartStyles();
   if (items.length === 0) return null;
   return (
     <Card>
       <Text style={chartStyles.title}>{title}</Text>
       <View style={{ height: 8 }} />
-      <MiniBars items={items.slice(0, 8).map((c) => ({ label: c.label, value: c.total }))} />
+      <MiniBars items={items.slice(0, 8).map((c) => ({ label: c.label, value: c.total, tone }))} />
     </Card>
   );
 }
@@ -240,11 +240,11 @@ export function MonthlyChart({ monthly }: { monthly: { label: string; income: nu
         <Text style={chartStyles.title}>Cash rhythm</Text>
         <View style={chartStyles.legend}>
           <View style={chartStyles.dotRow}>
-            <View style={[chartStyles.dot, { backgroundColor: theme.pine }]} />
+            <View style={[chartStyles.dot, { backgroundColor: theme.success }]} />
             <Text style={chartStyles.legendText}>In</Text>
           </View>
           <View style={chartStyles.dotRow}>
-            <View style={[chartStyles.dot, { backgroundColor: theme.accent }]} />
+            <View style={[chartStyles.dot, { backgroundColor: theme.danger }]} />
             <Text style={chartStyles.legendText}>Out</Text>
           </View>
         </View>
@@ -272,8 +272,8 @@ function BarPair({ income, expense, max, label, index }: { income: number; expen
   return (
     <View style={chartStyles.col}>
       <View style={chartStyles.bars}>
-        <Animated.View style={[chartStyles.bar, { backgroundColor: theme.pine }, s1]} />
-        <Animated.View style={[chartStyles.bar, { backgroundColor: theme.accent }, s2]} />
+        <Animated.View style={[chartStyles.bar, { backgroundColor: theme.success }, s1]} />
+        <Animated.View style={[chartStyles.bar, { backgroundColor: theme.danger }, s2]} />
       </View>
       <Text style={chartStyles.month}>{label}</Text>
     </View>

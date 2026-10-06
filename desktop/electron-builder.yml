@@ -10,10 +10,14 @@ files:
 extraResources:
   - from: ../server/dist/agro-server
     to: backend
+    filter:
+      - "**/*"
 win:
+  signAndEditExecutable: false
   target:
     - nsis
     - portable
+  icon: ../cell_phone/assets/icon.png
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

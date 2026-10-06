@@ -31,9 +31,11 @@ from django.contrib.auth.views import LoginView
 from django.utils import timezone
 from django.utils.translation import get_language
 from expenses.models import Expense, ExpenseCategory, Vendor
+from expenses.models import basis_weights, split_amount_by_trees
 from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 from farm.services import record_tree_movement
-from incomes.models import Customer, Income, IncomeCategory
+from incomes.models import Customer, Income, IncomeCategory, IncomeFarmAllocation
+from production.models import Production, ProductionIncomeLink
 from profiles.models import Profile
 from . import backup as workspace_backup
 from . import forms
@@ -51,7 +53,7 @@ class Resource:
 
 RESOURCES = {
     "farms": Resource(Farm, forms.FarmForm, "Your farms", "farm", "A little perspective on the land you care for.", "farm"),
-    "trees": Resource(TreePlanting, forms.TreePlantingForm, "Trees", "tree group", "How many trees of each type each farm has.", "tree"),
+    "trees": Resource(TreePlanting, forms.TreePlantingForm, "Trees/Crops", "tree/crop group", "How many trees/crops of each type each farm has.", "tree"),
     "tasks": Resource(FarmTask, forms.FarmTaskForm, "Tasks", "task", "History of work: watering, fertilizing, pruning and more.", "task"),
     "expenses": Resource(Expense, forms.ExpenseForm, "Expenses", "expense", "Every investment in your farm, in one place.", "transaction"),
     "incomes": Resource(Income, forms.IncomeForm, "Income", "income", "Keep track of what your hard work brings in.", "transaction"),
@@ -59,14 +61,15 @@ RESOURCES = {
     "customers": Resource(Customer, forms.CustomerForm, "Customers", "customer", "Good relationships start with keeping the details close.", "contact"),
     "expense-categories": Resource(ExpenseCategory, forms.ExpenseCategoryForm, "Expense categories", "expense category", "Give every expense a place to belong.", "category"),
     "income-categories": Resource(IncomeCategory, forms.IncomeCategoryForm, "Income categories", "income category", "Organize your sources of income.", "category"),
-    "tree-types": Resource(TreeType, forms.TreeTypeForm, "Tree types", "tree type", "The kinds of trees you grow.", "category"),
+    "tree-types": Resource(TreeType, forms.TreeTypeForm, "Tree/crop types", "tree/crop type", "The kinds of trees/crops you grow.", "category"),
     "task-categories": Resource(TaskCategory, forms.TaskCategoryForm, "Task categories", "task category", "Kinds of work: watering, fertilizing and more.", "category"),
+    "productions": Resource(Production, forms.ProductionForm, "Production", "production", "Harvest per year, farm and tree type, optionally linked to income.", "production"),
 }
 
 
 RESOURCES_EL = {
     "farms": Resource(Farm, forms.FarmForm, "Οι φάρμες μου", "φάρμα", "Μια συνοπτική εικόνα της γης που φροντίζετε.", "farm"),
-    "trees": Resource(TreePlanting, forms.TreePlantingForm, "Δέντρα", "ομάδα δέντρων", "Πόσα δέντρα από κάθε είδος έχει κάθε φάρμα.", "tree"),
+    "trees": Resource(TreePlanting, forms.TreePlantingForm, "Δέντρα/Καλλιέργειες", "ομάδα δέντρων/καλλιέργειας", "Πόσα δέντρα/καλλιέργειες από κάθε είδος έχει κάθε φάρμα.", "tree"),
     "tasks": Resource(FarmTask, forms.FarmTaskForm, "Εργασίες", "εργασία", "Ιστορικό εργασιών: πότισμα, λίπανση, κλάδεμα και άλλα.", "task"),
     "expenses": Resource(Expense, forms.ExpenseForm, "Έξοδα", "έξοδο", "Κάθε επένδυση στη φάρμα σας, σε ένα μέρος.", "transaction"),
     "incomes": Resource(Income, forms.IncomeForm, "Έσοδα", "έσοδο", "Παρακολουθήστε τι σας αποδίδει η σκληρή δουλειά.", "transaction"),
@@ -74,8 +77,9 @@ RESOURCES_EL = {
     "customers": Resource(Customer, forms.CustomerForm, "Πελάτες", "πελάτης", "Οι καλές σχέσεις ξεκινούν με προσοχή στη λεπτομέρεια.", "contact"),
     "expense-categories": Resource(ExpenseCategory, forms.ExpenseCategoryForm, "Κατηγορίες εξόδων", "κατηγορία εξόδου", "Δώστε σε κάθε έξοδο τη θέση του.", "category"),
     "income-categories": Resource(IncomeCategory, forms.IncomeCategoryForm, "Κατηγορίες εσόδων", "κατηγορία εσόδου", "Οργανώστε τις πηγές εσόδων σας.", "category"),
-    "tree-types": Resource(TreeType, forms.TreeTypeForm, "Είδη δέντρων", "είδος δέντρου", "Τα είδη δέντρων που καλλιεργείτε.", "category"),
+    "tree-types": Resource(TreeType, forms.TreeTypeForm, "Είδη δέντρων/καλλιεργειών", "είδος δέντρου/καλλιέργειας", "Τα είδη δέντρων/καλλιεργειών που καλλιεργείτε.", "category"),
     "task-categories": Resource(TaskCategory, forms.TaskCategoryForm, "Κατηγορίες εργασιών", "κατηγορία εργασίας", "Είδη εργασιών: πότισμα, λίπανση και άλλα.", "category"),
+    "productions": Resource(Production, forms.ProductionForm, "Παραγωγή", "παραγωγή", "Σοδειά ανά έτος, χωράφι και είδος, προαιρετικά με έσοδα.", "production"),
 }
 
 
@@ -163,6 +167,33 @@ def attach_income_summaries(incomes):
             income.farm_summary = f"{income.farm_summary}, {suffix}" if allocations else suffix
 
 
+def attach_production_summaries(productions):
+    """Attach display-only linked-income summaries for production rows."""
+    for production in productions:
+        links = list(getattr(production, "prefetched_incomes", []) or production.incomes.all())
+        production.income_summary = ", ".join(
+            f"{income.title} ({income.amount:.2f})" for income in links
+        )
+
+
+def auto_income_allocations(profile, amount, basis, tree_type=None):
+    """Auto-split an income amount across farms by the selected basis.
+
+    Returns a list of ``(farm, amount)`` with cent-exact rounding
+    (remainder goes to the largest farm, via ``split_amount_by_trees``).
+    Raises ``ValidationError`` when a variety basis matches no farm.
+    """
+    from django.core.exceptions import ValidationError
+
+    weights, total = basis_weights(profile, basis, tree_type)
+    if basis == "tree_type" and not total:
+        raise ValidationError("No farm has this tree/crop." if get_language() != "el"
+                              else "Καμία φάρμα δεν έχει αυτό το δέντρο/καλλιέργεια.")
+    shares = split_amount_by_trees(amount, weights)
+    farms = {farm.pk: farm for farm in Farm.objects.filter(profile=profile)}
+    return [(farms[farm_id], share) for farm_id, share in shares.items() if share]
+
+
 def workspace(request):
     profile, _ = Profile.objects.get_or_create(user=request.user)
     return profile
@@ -205,8 +236,34 @@ def home(request):
     recent.sort(key=lambda item: (item.date, item.created_at), reverse=True)
     attach_income_summaries([item for item in recent if isinstance(item, Income)])
     transactions = [{"record": item, "slug": "expenses" if isinstance(item, Expense) else "incomes"} for item in recent[:6]]
+    today = timezone.localdate()
+    unpaid_qs = Expense.objects.filter(profile=profile, is_paid=False).select_related("farm", "category")
+    unpaid_total = unpaid_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    overdue_qs = unpaid_qs.filter(date__lt=today)
+    overdue_total = overdue_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    due_items = list(unpaid_qs.order_by("date", "pk")[:5])
+    for item in due_items:
+        item.is_overdue = item.date < today
+    recent_tasks = list(FarmTask.objects.filter(profile=profile).select_related(
+        "farm", "category", "expense").order_by("-date", "-id")[:5])
+    recent_productions = list(Production.objects.filter(profile=profile).select_related(
+        "farm", "tree_type").prefetch_related("incomes").order_by("-year", "farm__title")[:5])
+    attach_production_summaries(recent_productions)
+    allocated_total = IncomeFarmAllocation.objects.filter(
+        profile=profile).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    income_total = Income.objects.filter(profile=profile).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    unallocated_total = max(Decimal("0"), income_total - allocated_total)
+    unlinked_count = Production.objects.filter(profile=profile, incomes__isnull=True).count()
+    last_task = FarmTask.objects.filter(profile=profile).order_by("-date").values_list("date", flat=True).first()
+    tasks_stale = last_task is None or (today - last_task).days > 14
+    task_count = FarmTask.objects.filter(profile=profile).count()
     return render(request, el_template(request, "frontend/home.html"), context_for(request, summary=localized_summary(request, financial_summary(profile)),
-                  farm_count=Farm.objects.filter(profile=profile).count(), recent=transactions, profile=profile))
+                  farm_count=Farm.objects.filter(profile=profile).count(), recent=transactions, profile=profile,
+                  unpaid_total=unpaid_total, overdue_total=overdue_total,
+                  unpaid_count=unpaid_qs.count(), overdue_count=overdue_qs.count(),
+                  due_items=due_items, recent_tasks=recent_tasks,
+                  recent_productions=recent_productions, unallocated_total=unallocated_total,
+                  unlinked_count=unlinked_count, tasks_stale=tasks_stale, task_count=task_count))
 
 
 @login_required
@@ -418,6 +475,9 @@ def record_list(request, resource):
         records, filters, query = filtered_trees(request, profile)
     elif spec.kind == "task":
         records, filters = filtered_tasks(request, profile)
+    elif spec.kind == "production":
+        records, filters = filtered_productions(request, profile)
+        total = None
     elif query:
         field = "title" if spec.kind == "farm" else "name"
         records = records.filter(**{field + "__icontains": query})
@@ -426,6 +486,8 @@ def record_list(request, resource):
     page = Paginator(records.order_by(*(spec.model._meta.ordering + ["pk"])), 12).get_page(request.GET.get("page"))
     if resource == "incomes":
         attach_income_summaries(page.object_list)
+    if resource == "productions":
+        attach_production_summaries(page.object_list)
     params = request.GET.copy()
     params.pop("page", None)
     return render(request, el_template(request, "frontend/record_list.html"), context_for(request, resource,
@@ -587,10 +649,54 @@ def filtered_tasks(request, profile):
     return records, filters
 
 
+def filtered_productions(request, profile):
+    """Apply the production filter form; invalid filters yield no records."""
+    records = Production.objects.filter(profile=profile).select_related(
+        "farm", "tree_type").prefetch_related("incomes")
+    filters = forms.ProductionFilterForm(request.GET, profile=profile)
+    if filters.is_valid():
+        data = filters.cleaned_data
+        if data["q"]:
+            records = records.filter(
+                Q(notes__icontains=data["q"]) | Q(farm__title__icontains=data["q"])
+                | Q(tree_type__name__icontains=data["q"]))
+        if data["farm"]:
+            records = records.filter(farm=data["farm"])
+        if data["tree_type"]:
+            records = records.filter(tree_type=data["tree_type"])
+        if data["year"]:
+            records = records.filter(year=data["year"])
+        if data["unit"]:
+            records = records.filter(unit=data["unit"])
+        if data.get("linked") == "linked":
+            records = records.filter(incomes__isnull=False).distinct()
+        elif data.get("linked") == "unlinked":
+            records = records.filter(incomes__isnull=True)
+    else:
+        records = records.none()
+    return records, filters
+
+
 @login_required
 def record_export(request, resource):
-    if resource not in ("expenses", "incomes"):
+    if resource not in ("expenses", "incomes", "productions"):
         raise Http404
+    spec = resource_for(resource, request)
+    profile = workspace(request)
+    if resource == "productions":
+        records, _ = filtered_productions(request, profile)
+        records = records.order_by(*(spec.model._meta.ordering + ["pk"]))
+        records = list(records)
+        attach_production_summaries(records)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{resource}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["year", "farm", "tree_type", "quantity", "unit", "incomes", "notes"])
+        for item in records:
+            writer.writerow([item.year, str(item.farm), str(item.tree_type),
+                             f"{item.quantity:.2f}", item.unit,
+                             getattr(item, "income_summary", ""), item.notes or ""])
+        return response
     spec = resource_for(resource, request)
     profile = workspace(request)
     records, _ = filtered_transactions(request, resource, spec, profile)
@@ -645,6 +751,23 @@ def record_form(request, resource, pk=None):
         if allocation_formset is not None:
             allocation_formset.instance = income
             allocation_formset.save()
+            if resource == "incomes" and not pk:
+                manual = IncomeFarmAllocation.objects.filter(profile=profile, income=income).exists()
+                basis = form.cleaned_data.get("allocation_basis")
+                if not manual and basis:
+                    try:
+                        shares = auto_income_allocations(
+                            profile, income.amount, basis,
+                            form.cleaned_data.get("allocation_tree_type"))
+                    except ValidationError as error:
+                        income.delete()
+                        form.add_error(None, error)
+                        return render(request, el_template(request, "frontend/record_form.html"), context_for(request, resource,
+                                      form=form, allocation_formset=allocation_formset, spec=spec, resource=resource,
+                                      editing=bool(pk), prerequisites=False))
+                    for farm, share in shares:
+                        IncomeFarmAllocation.objects.create(
+                            profile=profile, income=income, farm=farm, amount=share)
         flash(request,
               f"{spec.singular.capitalize()} {'updated' if pk else 'created'} successfully.",
               f"Η {spec.singular} {'ενημερώθηκε' if pk else 'δημιουργήθηκε'} με επιτυχία.")
@@ -656,6 +779,8 @@ def record_form(request, resource, pk=None):
         prerequisites = not Farm.objects.filter(profile=profile).exists() or not TreeType.objects.filter(profile=profile).exists()
     elif spec.kind == "task":
         prerequisites = not Farm.objects.filter(profile=profile).exists() or not TaskCategory.objects.filter(profile=profile).exists()
+    elif spec.kind == "production":
+        prerequisites = not Farm.objects.filter(profile=profile).exists() or not TreeType.objects.filter(profile=profile).exists()
     return render(request, el_template(request, "frontend/record_form.html"), context_for(request, resource,
                   form=form, allocation_formset=allocation_formset, spec=spec, resource=resource,
                   editing=bool(pk), prerequisites=prerequisites))

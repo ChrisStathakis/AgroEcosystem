@@ -10,7 +10,7 @@ hidden = []
 hidden += collect_submodules("waitress")
 hidden += collect_submodules("whitenoise")
 hidden += collect_submodules("config")
-for _pkg in ("profiles", "farm", "expenses", "incomes", "analytics", "frontend"):
+for _pkg in ("profiles", "farm", "expenses", "incomes", "production", "analytics", "frontend"):
     hidden += collect_submodules(_pkg)
 hidden += ["django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
            "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles"]

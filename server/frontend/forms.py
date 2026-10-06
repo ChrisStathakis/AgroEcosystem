@@ -8,6 +8,7 @@ from django.utils.translation import get_language
 from expenses.models import Expense, ExpenseCategory, Vendor
 from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 from incomes.models import Customer, Income, IncomeCategory, IncomeFarmAllocation
+from production.models import Production, ProductionIncomeLink
 from profiles.models import Profile
 
 
@@ -37,6 +38,9 @@ EL_FIELD_LABELS = {
     "title": "Τίτλος",
     "date": "Ημερομηνία",
     "amount": "Ποσό",
+    "quantity": "Ποσότητα",
+    "unit": "Μονάδα",
+    "year": "Έτος",
     "farm": "Φάρμα",
     "category": "Κατηγορία",
     "vendor": "Προμηθευτής",
@@ -53,7 +57,7 @@ EL_FIELD_LABELS = {
     "notes": "Σημειώσεις",
     "size": "Έκταση (στρέμματα)",
     "active": "Ενεργή",
-    "tree_type": "Είδος δέντρου",
+    "tree_type": "Είδος δέντρου/καλλιέργειας",
     "count": "Πλήθος δέντρων",
     "action": "Κίνηση",
     "quantity": "Πλήθος",
@@ -169,7 +173,7 @@ class FarmForm(OwnedForm):
 class ExpenseForm(OwnedForm):
     class Meta:
         model = Expense
-        fields = ["title", "date", "amount", "farm", "category", "vendor", "document_type", "include_in_tax", "is_paid", "is_archived", "description"]
+        fields = ["title", "date", "amount", "farm", "split_basis", "split_tree_type", "category", "vendor", "document_type", "include_in_tax", "is_paid", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
 
     def __init__(self, *args, **kwargs):
@@ -177,16 +181,70 @@ class ExpenseForm(OwnedForm):
         if "farm" in self.fields:
             self.fields["farm"].required = False
             self.fields["farm"].empty_label = (
-                "Όλες οι φάρμες — επιμερισμός με δέντρα" if in_greek()
-                else "All farms — split by trees"
+                "Όλες οι φάρμες — αυτόματος επιμερισμός" if in_greek()
+                else "All farms — auto split"
             )
+        if "split_tree_type" in self.fields:
+            self.fields["split_tree_type"].required = False
+            self.fields["split_basis"].required = False
+            if in_greek():
+                self.fields["split_basis"].label = "Βάση επιμερισμού"
+                self.fields["split_basis"].choices = [
+                    ("trees", "Δέντρα (σύνολο)"), ("tree_type", "Δέντρο/Καλλιέργεια (ποικιλία)"),
+                    ("area", "Στρέμματα"), ("equal", "Ίσα"),
+                ]
+                self.fields["split_tree_type"].label = "Δέντρο/Καλλιέργεια"
+            else:
+                self.fields["split_basis"].choices = [
+                    ("trees", "Trees (total)"), ("tree_type", "Tree/Crop (variety)"),
+                    ("area", "Stremmata"), ("equal", "Equal"),
+                ]
+
+    def clean(self):
+        data = super().clean()
+        if not data.get("split_basis"):
+            data["split_basis"] = "trees"
+        if data.get("farm") and data.get("split_basis") == "tree_type" and not data.get("split_tree_type"):
+            # Farm-bound expenses ignore split settings; clear them.
+            data["split_basis"] = "trees"
+        if not data.get("farm") and data.get("split_basis") == "tree_type" and not data.get("split_tree_type"):
+            raise ValidationError({"split_tree_type": "Διαλέξτε δέντρο/καλλιέργεια." if in_greek() else "Choose a tree/crop."})
+        return data
 
 
 class IncomeForm(OwnedForm):
+    allocation_basis = forms.ChoiceField(
+        required=False, label="Auto split",
+        choices=[("", "Manual allocations"), ("trees", "Trees (total)"), ("tree_type", "Tree/Crop (variety)"),
+                 ("area", "Stremmata"), ("equal", "Equal")],
+        help_text="Fill farm allocations automatically when no manual rows are given.",
+    )
+    allocation_tree_type = forms.ModelChoiceField(queryset=TreeType.objects.none(), required=False)
+
     class Meta:
         model = Income
         fields = ["title", "date", "amount", "category", "customer", "document_type", "include_in_tax", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        profile = self.instance.profile
+        self.fields["allocation_tree_type"].queryset = TreeType.objects.filter(profile=profile)
+        if in_greek():
+            self.fields["allocation_basis"].label = "Αυτόματη κατανομή"
+            self.fields["allocation_basis"].choices = [
+                ("", "Χειροκίνητες κατανομές"), ("trees", "Δέντρα (σύνολο)"),
+                ("tree_type", "Δέντρο/Καλλιέργεια (ποικιλία)"),
+                ("area", "Στρέμματα"), ("equal", "Ίσα"),
+            ]
+            self.fields["allocation_basis"].help_text = "Συμπληρώνει αυτόματα τις κατανομές όταν δεν δώσετε χειροκίνητες γραμμές."
+            self.fields["allocation_tree_type"].label = "Δέντρο/Καλλιέργεια"
+
+    def clean(self):
+        data = super().clean()
+        if data.get("allocation_basis") == "tree_type" and not data.get("allocation_tree_type"):
+            raise ValidationError({"allocation_tree_type": "Διαλέξτε δέντρο/καλλιέργεια." if in_greek() else "Choose a tree/crop."})
+        return data
 
 
 class IncomeAllocationForm(forms.ModelForm):
@@ -377,6 +435,102 @@ class ProfileForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         style_fields(self.fields)
         apply_greek_labels(self)
+
+
+class ProductionForm(OwnedForm):
+    incomes = forms.ModelMultipleChoiceField(
+        queryset=Income.objects.none(), required=False,
+        help_text="Optional incomes linked to this harvest.",
+    )
+
+    class Meta:
+        model = Production
+        fields = ["farm", "year", "tree_type", "quantity", "unit", "incomes", "notes"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        profile = self.instance.profile
+        self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        self.fields["tree_type"].queryset = TreeType.objects.filter(profile=profile)
+        self.fields["incomes"].queryset = Income.objects.filter(profile=profile).order_by("-date", "-id")
+        if in_greek():
+            self.fields["incomes"].label = "Έσοδα (προαιρετικά)"
+            self.fields["year"].label = "Έτος"
+            self.fields["quantity"].label = "Ποσότητα"
+            self.fields["unit"].label = "Μονάδα"
+            self.fields["unit"].choices = [("kg", "Κιλά"), ("tn", "Τόνοι"), ("l", "Λίτρα")]
+            self.fields["tree_type"].label = "Είδος δέντρου"
+        else:
+            self.fields["unit"].choices = [("kg", "Kg"), ("tn", "Tn"), ("l", "L")]
+
+    def clean_year(self):
+        year = self.cleaned_data["year"]
+        if year < 2000 or year > 2100:
+            raise ValidationError("Enter a year between 2000 and 2100." if not in_greek() else "Εισάγετε έτος από 2000 έως 2100.")
+        return year
+
+    def clean_quantity(self):
+        quantity = self.cleaned_data["quantity"]
+        if quantity <= 0:
+            raise ValidationError("Enter a quantity greater than zero." if not in_greek() else "Εισάγετε ποσότητα μεγαλύτερη του μηδενός.")
+        return quantity
+
+    def clean_incomes(self):
+        incomes = self.cleaned_data.get("incomes")
+        profile = self.instance.profile
+        for income in incomes or []:
+            if income.profile_id != profile.pk:
+                raise ValidationError("Income must belong to the same profile." if not in_greek() else "Το έσοδο πρέπει να ανήκει στον ίδιο χώρο.")
+        return incomes
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        incomes = list(self.cleaned_data.get("incomes") or [])
+        if commit:
+            instance.save()
+            self._save_income_links(instance, incomes)
+        else:
+            self._pending_incomes = incomes
+        return instance
+
+    def _save_m2m(self):
+        incomes = list(self.cleaned_data.get("incomes") or [])
+        self._save_income_links(self.instance, incomes)
+
+    def _save_income_links(self, instance, incomes):
+        profile = instance.profile
+        existing = set(instance.income_links.values_list("income_id", flat=True))
+        wanted = {income.pk for income in incomes}
+        for income_id in wanted - existing:
+            ProductionIncomeLink.objects.create(profile=profile, production=instance, income_id=income_id)
+        if wanted - existing or existing - wanted:
+            ProductionIncomeLink.objects.filter(production=instance).exclude(income_id__in=wanted).delete()
+
+    def _post_clean(self):
+        super()._post_clean()
+        # _pending_incomes saved on commit=False is applied by save()/ _save_m2m.
+
+
+class ProductionFilterForm(forms.Form):
+    q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Search production…"}))
+    farm = forms.ModelChoiceField(queryset=Farm.objects.none(), required=False, empty_label="All farms")
+    tree_type = forms.ModelChoiceField(queryset=TreeType.objects.none(), required=False, empty_label="All tree types")
+    year = forms.IntegerField(required=False, label="Year", min_value=2000, max_value=2100)
+    unit = forms.ChoiceField(required=False, label="Unit",
+                             choices=[("", "All units"), ("kg", "Kg"), ("tn", "Tn"), ("l", "L")])
+    linked = forms.ChoiceField(required=False, label="Income link",
+                               choices=[("all", "All"), ("linked", "Linked only"), ("unlinked", "Unlinked only")])
+
+    def __init__(self, *args, profile, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["farm"].queryset = Farm.objects.filter(profile=profile)
+        self.fields["tree_type"].queryset = TreeType.objects.filter(profile=profile)
+        style_fields(self.fields)
+        apply_greek_labels(self)
+        if in_greek():
+            self.fields["tree_type"].empty_label = "Όλα τα είδη"
+            self.fields["unit"].choices = [("", "Όλες οι μονάδες"), ("kg", "Κιλά"), ("tn", "Τόνοι"), ("l", "Λίτρα")]
+            self.fields["linked"].choices = [("all", "Όλα"), ("linked", "Μόνο συνδεδεμένα"), ("unlinked", "Χωρίς σύνδεση")]
 
 
 class TransactionFilterForm(forms.Form):

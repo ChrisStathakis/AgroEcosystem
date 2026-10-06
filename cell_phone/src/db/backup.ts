@@ -1,16 +1,16 @@
-// Port of server/frontend/backup.py (BACKUP_VERSION 3) to offline SQLite.
+// Port of server/frontend/backup.py (BACKUP_VERSION 5) to offline SQLite.
 // Everything is scoped to SINGLE_PROFILE_ID. Supports replace/merge,
-// legacy v1 (counts only) and v2 (no allocations split) payloads.
+// legacy v1 (counts only), v2/v3 (no productions) and v4 (no split basis) payloads.
 import { getDb } from './client';
 import { nowISO, SINGLE_PROFILE_ID } from './types';
 
-export const BACKUP_VERSION = 3;
+export const BACKUP_VERSION = 5;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 export const COLLECTIONS = [
   'expense_categories', 'income_categories', 'task_categories', 'tree_types',
   'farms', 'vendors', 'customers', 'tree_plantings', 'tree_movements', 'expenses', 'incomes',
-  'tasks',
+  'tasks', 'productions', 'production_links',
 ] as const;
 
 export class BackupError extends Error {}
@@ -47,6 +47,8 @@ export async function workspaceCounts(): Promise<Record<string, number>> {
     income_categories: await count('income_categories'),
     tree_types: await count('tree_types'),
     task_categories: await count('task_categories'),
+    productions: await count('productions'),
+    production_links: await count('production_income_links'),
   };
 }
 
@@ -82,6 +84,10 @@ export async function buildBackup(): Promise<any> {
     allocByIncome.get(a.income_id)!.push(a);
   }
   const tasks = await all<any>('SELECT * FROM farm_tasks WHERE profile_id = ? ORDER BY id', [SINGLE_PROFILE_ID]);
+  const productions = await all<any>('SELECT * FROM productions WHERE profile_id = ? ORDER BY id', [SINGLE_PROFILE_ID]);
+  const productionIdx = new Map(productions.map((p: any, i: number) => [p.id, i]));
+  const incomeIdx = new Map(incomes.map((i: any, idx: number) => [i.id, idx]));
+  const prodLinks = await all<any>('SELECT * FROM production_income_links WHERE profile_id = ? ORDER BY id', [SINGLE_PROFILE_ID]);
 
   return {
     version: BACKUP_VERSION,
@@ -110,6 +116,8 @@ export async function buildBackup(): Promise<any> {
       title: e.title, description: e.description ?? '', amount: String(e.amount), date: e.date,
       document_type: e.document_type, include_in_tax: !!e.include_in_tax, is_paid: !!e.is_paid,
       is_archived: !!e.is_archived,
+      split_basis: e.split_basis ?? 'trees',
+      split_tree_type: e.split_tree_type_id ? treeTypeIdx.get(e.split_tree_type_id) ?? null : null,
     })),
     incomes: incomes.map((i: any) => ({
       allocations: (allocByIncome.get(i.id) ?? []).map((a: any) => ({ farm: farmIdx.get(a.farm_id), amount: String(a.amount) })),
@@ -125,15 +133,23 @@ export async function buildBackup(): Promise<any> {
       expense: t.expense_id ? expenseIdx.get(t.expense_id) ?? null : null,
       title: t.title, description: t.description ?? '', date: t.date,
     })),
+    productions: productions.map((p: any) => ({
+      farm: farmIdx.get(p.farm_id), tree_type: treeTypeIdx.get(p.tree_type_id),
+      year: p.year, quantity: String(p.quantity), unit: p.unit, notes: p.notes ?? '',
+    })),
+    production_links: prodLinks
+      .filter((l: any) => productionIdx.has(l.production_id) && incomeIdx.has(l.income_id))
+      .map((l: any) => ({ production: productionIdx.get(l.production_id), income: incomeIdx.get(l.income_id) })),
   };
 }
 
 export function describePayload(payload: any): Record<string, number> {
   if (!payload || typeof payload !== 'object') throw new BackupError('This file is not a valid backup.');
-  if (![1, 2, BACKUP_VERSION].includes(payload.version)) throw new BackupError('This backup was made by an unsupported app version.');
+  if (![1, 2, 3, 4, BACKUP_VERSION].includes(payload.version)) throw new BackupError('This backup was made by an unsupported app version.');
   const counts: Record<string, number> = {};
   for (const key of COLLECTIONS) {
-    if (key === 'tree_movements' && ![2, BACKUP_VERSION].includes(payload.version)) counts[key] = 0;
+    if (key === 'tree_movements' && ![2, 3, 4, BACKUP_VERSION].includes(payload.version)) counts[key] = 0;
+    else if ((key === 'productions' || key === 'production_links') && [1, 2, 3].includes(payload.version)) counts[key] = 0;
     else counts[key] = requireList(payload, key).length;
   }
   return counts;
@@ -144,11 +160,21 @@ function checkedDocument(v: any, section: string): string {
   return v;
 }
 
+function checkedUnit(v: any): string {
+  if (v !== 'kg' && v !== 'tn' && v !== 'l') throw new BackupError(`Backup item in 'productions' has an invalid unit.`);
+  return v;
+}
+
+function checkedSplitBasis(v: any): string {
+  if (v !== 'trees' && v !== 'tree_type' && v !== 'area' && v !== 'equal') throw new BackupError(`Backup item in 'expenses' has an invalid split basis.`);
+  return v;
+}
+
 export async function destroyWorkspace(): Promise<void> {
   const db = getDb();
   await db.withTransactionAsync(async () => {
     await db.execAsync('PRAGMA foreign_keys = OFF;');
-    for (const t of ['farm_tasks', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
+    for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
       await db.runAsync(`DELETE FROM ${t} WHERE profile_id = ?`, [SINGLE_PROFILE_ID]);
     }
     await db.execAsync('PRAGMA foreign_keys = ON;');
@@ -177,7 +203,7 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
   const db = getDb();
   await db.withTransactionAsync(async () => {
     if (mode === 'replace') {
-      for (const t of ['farm_tasks', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
+      for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
         await db.runAsync(`DELETE FROM ${t} WHERE profile_id = ?`, [SINGLE_PROFILE_ID]);
       }
     }
@@ -266,6 +292,8 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
       const farm = item.farm != null ? requireIndex(farms, item.farm, 'expenses', 'farm') : null;
       const category = requireIndex(expenseCats, item.category, 'expenses', 'category');
       const vendor = item.vendor != null ? requireIndex(vendors, item.vendor, 'expenses', 'vendor') : null;
+      const splitBasis = checkedSplitBasis(item.split_basis ?? 'trees');
+      const splitTreeType = item.split_tree_type != null ? requireIndex(treeTypes, item.split_tree_type, 'expenses', 'split_tree_type') : null;
       if (mode === 'merge') {
         const dup = await db.getFirstAsync<any>(
           'SELECT * FROM expenses WHERE profile_id = ? AND farm_id IS ? AND title = ? AND date = ? AND amount = ?',
@@ -277,10 +305,10 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
         }
       }
       const res = await db.runAsync(
-        'INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, split_basis, split_tree_type_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [SINGLE_PROFILE_ID, farm?.id ?? null, category.id, vendor?.id ?? null, item.title ?? '', item.description ?? '', item.amount ?? 0, item.date,
           checkedDocument(item.document_type, 'expenses'), item.include_in_tax ? 1 : 0, item.is_paid === false ? 0 : 1,
-          item.is_archived ? 1 : 0, nowISO(), nowISO()],
+          item.is_archived ? 1 : 0, splitBasis, splitTreeType?.id ?? null, nowISO(), nowISO()],
       );
       expenses.push((await db.getFirstAsync<any>('SELECT * FROM expenses WHERE id = ?', [res.lastInsertRowId]))!);
     }
@@ -357,6 +385,63 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
       await db.runAsync("UPDATE profiles SET display_name = ?, updated_at = datetime('now') WHERE id = ?", [payload.display_name, SINGLE_PROFILE_ID]);
     }
     counts.tasks = mode === 'merge' ? createdTasks : requireList(payload, 'tasks').length;
+
+    const productions: any[] = [];
+    const productionItems: any[] = payload.version === BACKUP_VERSION ? requireList(payload, 'productions') : [];
+    for (const item of productionItems) {
+      const farm = requireIndex(farms, item.farm, 'productions', 'farm');
+      const treeType = requireIndex(treeTypes, item.tree_type, 'productions', 'tree_type');
+      if (mode === 'merge') {
+        const existing = await db.getFirstAsync<any>(
+          'SELECT * FROM productions WHERE profile_id = ? AND farm_id = ? AND tree_type_id = ? AND year = ?',
+          [SINGLE_PROFILE_ID, farm.id, treeType.id, item.year],
+        );
+        if (existing) {
+          productions.push(existing);
+          continue;
+        }
+      }
+      try {
+        const res = await db.runAsync(
+          'INSERT INTO productions (profile_id, farm_id, tree_type_id, year, quantity, unit, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [SINGLE_PROFILE_ID, farm.id, treeType.id, item.year, item.quantity ?? 0, checkedUnit(item.unit), item.notes ?? '', nowISO(), nowISO()],
+        );
+        productions.push((await db.getFirstAsync<any>('SELECT * FROM productions WHERE id = ?', [res.lastInsertRowId]))!);
+      } catch (e: any) {
+        if (mode === 'merge' && String(e?.message ?? '').includes('UNIQUE')) {
+          const existing = await db.getFirstAsync<any>(
+            'SELECT * FROM productions WHERE profile_id = ? AND farm_id = ? AND tree_type_id = ? AND year = ?',
+            [SINGLE_PROFILE_ID, farm.id, treeType.id, item.year],
+          );
+          if (existing) {
+            productions.push(existing);
+            continue;
+          }
+        }
+        throw e;
+      }
+    }
+    const linkItems: any[] = payload.version === BACKUP_VERSION ? requireList(payload, 'production_links') : [];
+    let createdLinks = 0;
+    for (const item of linkItems) {
+      const production = requireIndex(productions, item.production, 'production_links', 'production');
+      if (!Number.isInteger(item.income) || (item.income as number) < 0 || (item.income as number) >= incomes.length) {
+        throw new BackupError(`Backup item 'income' in 'production_links' points to a missing record.`);
+      }
+      const income = incomes[item.income as number];
+      const existing = await db.getFirstAsync<any>(
+        'SELECT * FROM production_income_links WHERE profile_id = ? AND production_id = ? AND income_id = ?',
+        [SINGLE_PROFILE_ID, production.id, income.id],
+      );
+      if (existing) continue;
+      await db.runAsync(
+        'INSERT INTO production_income_links (profile_id, production_id, income_id) VALUES (?, ?, ?)',
+        [SINGLE_PROFILE_ID, production.id, income.id],
+      );
+      createdLinks += 1;
+    }
+    counts.productions = mode === 'merge' ? productions.length : productionItems.length;
+    counts.production_links = mode === 'merge' ? createdLinks : linkItems.length;
   });
   return counts;
 }

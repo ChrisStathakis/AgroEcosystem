@@ -11,14 +11,15 @@ from expenses.models import Expense, ExpenseCategory, Vendor
 from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 from incomes import models as income_models
 from incomes.models import IncomeFarmAllocation
+from production.models import Production, ProductionIncomeLink
 
-BACKUP_VERSION = 3
+BACKUP_VERSION = 5
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 COLLECTIONS = (
     "expense_categories", "income_categories", "task_categories", "tree_types",
     "farms", "vendors", "customers", "tree_plantings", "tree_movements", "expenses", "incomes",
-    "tasks",
+    "tasks", "productions", "production_links",
 )
 
 
@@ -46,6 +47,8 @@ def workspace_counts(profile) -> dict:
         "income_categories": income_models.IncomeCategory.objects.filter(profile=profile).count(),
         "tree_types": TreeType.objects.filter(profile=profile).count(),
         "task_categories": TaskCategory.objects.filter(profile=profile).count(),
+        "productions": Production.objects.filter(profile=profile).count(),
+        "production_links": ProductionIncomeLink.objects.filter(profile=profile).count(),
     }
 
 
@@ -70,6 +73,11 @@ def build_backup(profile) -> dict:
     movements = list(TreeInventoryMovement.objects.filter(profile=profile).order_by("pk"))
     expenses = list(Expense.objects.filter(profile=profile).order_by("pk"))
     expense_idx = {e.pk: i for i, e in enumerate(expenses)}
+    incomes_list = list(income_models.Income.objects.filter(profile=profile).order_by("pk"))
+    income_idx = {i.pk: idx for idx, i in enumerate(incomes_list)}
+    productions = list(Production.objects.filter(profile=profile).order_by("pk"))
+    production_idx = {p.pk: i for i, p in enumerate(productions)}
+    prod_links = list(ProductionIncomeLink.objects.filter(profile=profile).order_by("pk"))
 
     return {
         "version": BACKUP_VERSION,
@@ -95,7 +103,9 @@ def build_backup(profile) -> dict:
                       "vendor": vendor_idx[e.vendor_id] if e.vendor_id else None,
                       "title": e.title, "description": e.description, "amount": str(e.amount),
                       "date": e.date.isoformat(), "document_type": e.document_type,
-                      "include_in_tax": e.include_in_tax, "is_paid": e.is_paid, "is_archived": e.is_archived} for e in expenses],
+                      "include_in_tax": e.include_in_tax, "is_paid": e.is_paid, "is_archived": e.is_archived,
+                      "split_basis": e.split_basis,
+                      "split_tree_type": tree_type_idx[e.split_tree_type_id] if e.split_tree_type_id else None} for e in expenses],
         "incomes": [{"allocations": [{"farm": farm_idx[a.farm_id], "amount": str(a.amount)}
                                         for a in i.allocations.all()],
                      "category": income_category_idx[i.category_id],
@@ -111,6 +121,13 @@ def build_backup(profile) -> dict:
                    "title": t.title, "description": t.description,
                    "date": t.date.isoformat()}
                   for t in FarmTask.objects.filter(profile=profile).order_by("pk")],
+        "productions": [{"farm": farm_idx[p.farm_id], "tree_type": tree_type_idx[p.tree_type_id],
+                         "year": p.year, "quantity": str(p.quantity), "unit": p.unit,
+                         "notes": p.notes} for p in productions],
+        "production_links": [{"production": production_idx[link.production_id],
+                              "income": income_idx[link.income_id]}
+                             for link in prod_links
+                             if link.production_id in production_idx and link.income_id in income_idx],
     }
 
 
@@ -118,6 +135,8 @@ def destroy_workspace(profile):
     """Delete every workspace row owned by ``profile`` (user kept)."""
     # Reverse dependency order: tasks reference plantings/expenses, which
     # reference farms/categories — delete leaves first.
+    ProductionIncomeLink.objects.filter(profile=profile).delete()
+    Production.objects.filter(profile=profile).delete()
     FarmTask.objects.filter(profile=profile).delete()
     Expense.objects.filter(profile=profile).delete()
     income_models.Income.objects.filter(profile=profile).delete()
@@ -152,12 +171,17 @@ def describe_payload(payload) -> dict:
     if not isinstance(payload, dict):
         raise BackupError("This file is not a valid backup.",
                           "Αυτό το αρχείο δεν είναι έγκυρο αντίγραφο ασφαλείας.")
-    if payload.get("version") not in (1, 2, BACKUP_VERSION):
+    if payload.get("version") not in (1, 2, 3, 4, BACKUP_VERSION):
         raise BackupError("This backup was made by an unsupported app version.",
                           "Αυτό το αντίγραφο έγινε από μη υποστηριζόμενη έκδοση.")
     counts = {}
     for key in COLLECTIONS:
-        counts[key] = len(_require_list(payload, key)) if key != "tree_movements" or payload.get("version") in (2, BACKUP_VERSION) else 0
+        if key == "tree_movements" and payload.get("version") not in (2, 3, 4, BACKUP_VERSION):
+            counts[key] = 0
+        elif key in ("productions", "production_links") and payload.get("version") in (1, 2, 3):
+            counts[key] = 0
+        else:
+            counts[key] = len(_require_list(payload, key))
     return counts
 
 
@@ -215,7 +239,7 @@ def restore_backup(profile, payload, mode="replace") -> dict:
         planting.save()
         plantings.append(planting)
 
-    movement_items = _require_list(payload, "tree_movements") if payload.get("version") in (2, BACKUP_VERSION) else []
+    movement_items = _require_list(payload, "tree_movements") if payload.get("version") in (2, 3, 4, BACKUP_VERSION) else []
     if payload.get("version") == 1:
         # Legacy backups contain only the current count; preserve it as an opening movement.
         movement_items = [{"planting": index, "action": "add", "quantity": item.get("count", 0),
@@ -259,7 +283,10 @@ def restore_backup(profile, payload, mode="replace") -> dict:
                           document_type=_checked_document(item.get("document_type"), "expenses"),
                           include_in_tax=bool(item.get("include_in_tax", False)),
                           is_paid=bool(item.get("is_paid", True)),
-                          is_archived=bool(item.get("is_archived", False)))
+                          is_archived=bool(item.get("is_archived", False)),
+                          split_basis=_checked_basis(item.get("split_basis", "trees")),
+                          split_tree_type=(_require_index(tree_types, item.get("split_tree_type"), "expenses", "split_tree_type")
+                                           if item.get("split_tree_type") is not None else None))
         expense.full_clean()
         expense.save()
         expenses.append(expense)
@@ -337,6 +364,43 @@ def restore_backup(profile, payload, mode="replace") -> dict:
         profile.save(update_fields=["display_name", "updated_at"])
 
     counts["tasks"] = created_tasks if mode == "merge" else len(_require_list(payload, "tasks"))
+
+    productions = []
+    production_items = _require_list(payload, "productions") if payload.get("version") == BACKUP_VERSION else []
+    for item in production_items:
+        farm = _require_index(farms, item.get("farm"), "productions", "farm")
+        tree_type = _require_index(tree_types, item.get("tree_type"), "productions", "tree_type")
+        if mode == "merge":
+            existing = Production.objects.filter(
+                profile=profile, farm=farm, tree_type=tree_type, year=item.get("year")).first()
+            if existing is not None:
+                productions.append(existing)
+                continue
+        production = Production(
+            profile=profile, farm=farm, tree_type=tree_type, year=item.get("year"),
+            quantity=item.get("quantity", 0), unit=_checked_unit(item.get("unit")),
+            notes=item.get("notes", ""))
+        production.full_clean()
+        production.save()
+        productions.append(production)
+
+    link_items = _require_list(payload, "production_links") if payload.get("version") == BACKUP_VERSION else []
+    created_links = 0
+    for item in link_items:
+        production = _require_index(productions, item.get("production"), "production_links", "production")
+        income_pos = item.get("income")
+        if not isinstance(income_pos, int) or income_pos < 0 or income_pos >= len(incomes):
+            raise BackupError("Backup item 'income' in 'production_links' points to a missing record.",
+                              "Η αναφορά 'income' στην ενότητα 'production_links' δείχνει σε εγγραφή που λείπει.")
+        income = incomes[income_pos]
+        if ProductionIncomeLink.objects.filter(profile=profile, production=production, income=income).exists():
+            continue
+        link = ProductionIncomeLink(profile=profile, production=production, income=income)
+        link.full_clean()
+        link.save()
+        created_links += 1
+    counts["productions"] = len(productions) if mode == "replace" else len(production_items)
+    counts["production_links"] = len(link_items) if mode == "replace" else created_links
     return counts
 
 
@@ -344,6 +408,20 @@ def _checked_document(value, section):
     if value not in ("invoice", "receipt"):
         raise BackupError(f"Backup item in '{section}' has an invalid document type.",
                           f"Εγγραφή στην ενότητα '{section}' έχει μη έγκυρο τύπο παραστατικού.")
+    return value
+
+
+def _checked_unit(value):
+    if value not in ("kg", "tn", "l"):
+        raise BackupError("Backup item in 'productions' has an invalid unit.",
+                          "Εγγραφή στην ενότητα 'productions' έχει μη έγκυρη μονάδα.")
+    return value
+
+
+def _checked_basis(value):
+    if value not in ("trees", "tree_type", "area", "equal"):
+        raise BackupError("Backup item in 'expenses' has an invalid split basis.",
+                          "Εγγραφή στην ενότητα 'expenses' έχει μη έγκυρη βάση επιμερισμού.")
     return value
 
 

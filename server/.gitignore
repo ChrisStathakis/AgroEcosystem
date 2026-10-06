@@ -4,3 +4,7 @@ __pycache__/
 *.sqlite3
 *.sqlite3-*
 .preview/
+# PyInstaller outputs (desktop backend bundle inputs are rebuilt locally)
+build/
+dist/
+*.spec~

@@ -270,7 +270,7 @@ class WorkspaceBackupTests(TestCase):
         response = self.client.get("/el/workspace/backup/")
         self.assertEqual(response["Content-Type"], "application/json")
         payload = json.loads(response.content.decode())
-        self.assertEqual(payload["version"], 3)
+        self.assertEqual(payload["version"], 5)
         self.assertEqual(len(payload["farms"]), 1)
         self.assertEqual(payload["farms"][0]["title"], "North")
         self.assertEqual(len(payload["expenses"]), 1)
@@ -284,6 +284,23 @@ class WorkspaceBackupTests(TestCase):
         self.assertEqual(Expense.objects.filter(profile=profile).count(), 1)
         self.assertEqual(Income.objects.filter(profile=profile).count(), 1)
         self.assertEqual(counts["farms"], 1)
+
+    def test_backup_preserves_split_basis_and_restores_legacy_as_trees(self):
+        user, profile, farm, expense_category, income_category = make_workspace()
+        Expense.objects.create(profile=profile, category=expense_category,
+                               title="Shared area", amount="90.00", document_type="receipt",
+                               date=timezone.localdate(), split_basis="area")
+        payload = build_backup(profile)
+        self.assertEqual(payload["expenses"][0]["split_basis"], "area")
+        destroy_workspace(profile)
+        restore_backup(profile, payload, mode="replace")
+        self.assertEqual(Expense.objects.get(profile=profile, title="Shared area").split_basis, "area")
+        # Legacy v4 payloads without split fields restore as trees.
+        payload["expenses"][0].pop("split_basis")
+        payload["version"] = 4
+        destroy_workspace(profile)
+        restore_backup(profile, payload, mode="replace")
+        self.assertEqual(Expense.objects.get(profile=profile, title="Shared area").split_basis, "trees")
 
     def test_legacy_income_backup_restores_full_farm_allocation(self):
         user, profile, farm = make_full_workspace()
@@ -759,3 +776,82 @@ class ArchivedTransactionTests(TestCase):
         restore_backup(profile, payload, mode="replace")
         self.assertFalse(Expense.objects.get(profile=profile).is_archived)
         self.assertFalse(Income.objects.get(profile=profile).is_archived)
+
+
+class SplitBasisTests(TestCase):
+    def _workspace(self, username="splitter"):
+        import datetime
+
+        user, profile, north, expense_category, income_category = make_workspace(username)
+        south = Farm.objects.create(profile=profile, title="South", size="3.00")
+        Farm.objects.filter(pk=north.pk).update(size="1.00")
+        north.refresh_from_db()
+        olive = TreeType.objects.create(profile=profile, name="Olive")
+        orange = TreeType.objects.create(profile=profile, name="Orange")
+        record_tree_movement(profile=profile, farm=north, tree_type=olive, action="add", quantity=30)
+        record_tree_movement(profile=profile, farm=south, tree_type=olive, action="add", quantity=10)
+        record_tree_movement(profile=profile, farm=south, tree_type=orange, action="add", quantity=90)
+        return user, profile, north, south, olive, orange, expense_category, income_category
+
+    def test_shared_expense_splits_by_area(self):
+        from analytics.services import farm_profit
+
+        user, profile, north, south, olive, orange, expense_category, income_category = self._workspace()
+        Expense.objects.create(profile=profile, category=expense_category, title="Shared area",
+                               amount="80.00", document_type="receipt", date=timezone.localdate(),
+                               split_basis="area")
+        result = farm_profit(profile, timezone.localdate().year)
+        by_name = {row["farm"]: row for row in result["farms"]}
+        # North 1 stremma, South 3 stremmata => 20 / 60.
+        self.assertEqual(by_name["North"]["expense"], Decimal("20.00"))
+        self.assertEqual(by_name["South"]["expense"], Decimal("60.00"))
+
+    def test_shared_expense_splits_by_variety(self):
+        from analytics.services import farm_profit
+
+        user, profile, north, south, olive, orange, expense_category, income_category = self._workspace()
+        Expense.objects.create(profile=profile, category=expense_category, title="Olive only",
+                               amount="80.00", document_type="receipt", date=timezone.localdate(),
+                               split_basis="tree_type", split_tree_type=olive)
+        result = farm_profit(profile, timezone.localdate().year)
+        by_name = {row["farm"]: row for row in result["farms"]}
+        # Olive: North 30, South 10 => 60 / 20. Orange trees ignored.
+        self.assertEqual(by_name["North"]["expense"], Decimal("60.00"))
+        self.assertEqual(by_name["South"]["expense"], Decimal("20.00"))
+
+    def test_shared_expense_splits_equal(self):
+        from analytics.services import farm_profit
+
+        user, profile, north, south, olive, orange, expense_category, income_category = self._workspace()
+        Expense.objects.create(profile=profile, category=expense_category, title="Shared equal",
+                               amount="80.00", document_type="receipt", date=timezone.localdate(),
+                               split_basis="equal")
+        result = farm_profit(profile, timezone.localdate().year)
+        by_name = {row["farm"]: row for row in result["farms"]}
+        self.assertEqual(by_name["North"]["expense"], Decimal("40.00"))
+        self.assertEqual(by_name["South"]["expense"], Decimal("40.00"))
+
+    def test_income_auto_split_by_area(self):
+        user, profile, north, south, olive, orange, expense_category, income_category = self._workspace()
+        self.client.force_login(user)
+        prefix = self.client.get("/el/incomes/new/").context["allocation_formset"].prefix
+        response = self.client.post("/el/incomes/new/", {
+            "title": "Auto sale", "date": timezone.localdate().isoformat(),
+            "amount": "80.00", "category": str(income_category.pk),
+            "document_type": "invoice", "allocation_basis": "area",
+            f"{prefix}-TOTAL_FORMS": "3", f"{prefix}-INITIAL_FORMS": "0",
+            f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"})
+        self.assertRedirects(response, "/el/incomes/")
+        income = Income.objects.get(profile=profile, title="Auto sale")
+        shares = {a.farm.title: a.amount for a in income.allocations.all()}
+        self.assertEqual(shares, {"North": Decimal("20.00"), "South": Decimal("60.00")})
+
+    def test_expense_variety_requires_tree_type(self):
+        user, profile, north, south, olive, orange, expense_category, income_category = self._workspace()
+        self.client.force_login(user)
+        response = self.client.post("/el/expenses/new/", {
+            "title": "Bad split", "date": timezone.localdate().isoformat(), "amount": "10.00",
+            "category": str(expense_category.pk), "document_type": "receipt",
+            "split_basis": "tree_type"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Expense.objects.filter(profile=profile, title="Bad split").exists())

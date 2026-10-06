@@ -1,6 +1,6 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import type { Expense, Income } from '../db/types';
+import type { Expense, Income, Production } from '../db/types';
 
 function csvCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -139,6 +139,31 @@ export async function exportAndShare(kind: 'expenses' | 'incomes', rows: (Expens
   const csv = transactionsToCSV(kind, rows);
   const file = new File(Paths.cache, `${kind}.csv`);
   file.write(csv);
+  if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'text/csv' });
+  return file.uri;
+}
+
+export function productionsToCSV(rows: Production[]): string {
+  const lines = ['year,farm,tree_type,quantity,unit,incomes,notes'];
+  for (const r of rows) {
+    lines.push(
+      [
+        String(r.year),
+        csvCell(r.farm_title ?? String(r.farm_id)),
+        csvCell(r.tree_type_name ?? String(r.tree_type_id)),
+        Number(r.quantity).toFixed(2),
+        r.unit,
+        csvCell(r.income_summary ?? ''),
+        csvCell(r.notes ?? ''),
+      ].join(','),
+    );
+  }
+  return lines.join('\n');
+}
+
+export async function exportProductionsAndShare(rows: Production[]): Promise<string> {
+  const file = new File(Paths.cache, 'productions.csv');
+  file.write(productionsToCSV(rows));
   if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'text/csv' });
   return file.uri;
 }

@@ -3,6 +3,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { OverviewScreen } from '../screens/OverviewScreen';
 import { AnalyticsScreen } from '../screens/AnalyticsScreen';
 import { FarmsScreen } from '../screens/FarmsScreen';
+import { ProductionsScreen } from '../screens/ProductionsScreen';
 import { TreesScreen } from '../screens/TreesScreen';
 import { TasksScreen } from '../screens/TasksScreen';
 import { ExpensesScreen, IncomesScreen } from '../screens/TransactionsScreens';
@@ -31,6 +32,7 @@ export function AppNavigator() {
     >
       <Drawer.Screen name="Overview" component={OverviewScreen} />
       <Drawer.Screen name="Farms" component={FarmsScreen} />
+      <Drawer.Screen name="Production" component={ProductionsScreen} />
       <Drawer.Screen name="Trees" component={TreesScreen} />
       <Drawer.Screen name="Tasks" component={TasksScreen} />
       <Drawer.Screen name="Expenses" component={ExpensesScreen} />

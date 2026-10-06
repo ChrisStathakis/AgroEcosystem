@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { financialSummary, recentTransactions } from '../db/repositories/analytics';
+import { financialSummary, lastTaskDate, obligationsSummary, recentProductions, recentTasks, recentTransactions, unallocatedIncomeTotal, unlinkedProductionsCount } from '../db/repositories/analytics';
 import type { FinancialSummary } from '../db/types';
 import { HeroBalance, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
@@ -14,6 +14,12 @@ import { FloatingTabBar } from '../navigation/FloatingTabBar';
 export function OverviewScreen({ navigation }: any) {
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [recent, setRecent] = useState<any[]>([]);
+  const [obligations, setObligations] = useState<{ unpaid_total: number; overdue_total: number; unpaid_count: number; overdue_count: number; items: any[] } | null>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [harvests, setHarvests] = useState<any[]>([]);
+  const [unallocated, setUnallocated] = useState(0);
+  const [unlinked, setUnlinked] = useState(0);
+  const [tasksStale, setTasksStale] = useState(false);
   const [loading, setLoading] = useState(true);
   const theme = useColors();
 
@@ -24,6 +30,17 @@ export function OverviewScreen({ navigation }: any) {
         try {
           setSummary(await financialSummary());
           setRecent(await recentTransactions(6));
+          setObligations(await obligationsSummary());
+          setTasks(await recentTasks(5));
+          setHarvests(await recentProductions(5));
+          setUnallocated(await unallocatedIncomeTotal());
+          setUnlinked(await unlinkedProductionsCount());
+          const last = await lastTaskDate();
+          if (!last) setTasksStale(true);
+          else {
+            const days = Math.floor((Date.now() - new Date(last).getTime()) / 86400000);
+            setTasksStale(days > 14);
+          }
         } finally {
           setLoading(false);
         }
@@ -45,6 +62,53 @@ export function OverviewScreen({ navigation }: any) {
             {summary && <HeroBalance balance={summary.balance} income={summary.income_total} expense={summary.expense_total} />}
             {summary && <Stats income={summary.income_total} expense={summary.expense_total} balance={summary.balance} />}
             {summary && <MonthlyChart monthly={summary.monthly.map((m) => ({ ...m, label: localizeMonthLabel(m.label) }))} />}
+
+            {((obligations && (obligations.overdue_count > 0 || obligations.unpaid_count > 0)) || unallocated > 0.000001 || unlinked > 0) && (
+              <Card>
+                <Text style={{ fontWeight: '800', color: theme.ink, fontSize: 15, marginBottom: 8 }}>⚠ Attention</Text>
+                {(obligations?.overdue_count ?? 0) > 0 && (
+                  <Text style={{ color: theme.danger, fontWeight: '700', paddingVertical: 3 }}>
+                    {t('overdue')}: {fmt(obligations!.overdue_total)} ({obligations!.overdue_count})
+                  </Text>
+                )}
+                {(obligations?.unpaid_count ?? 0) > 0 && (
+                  <Text style={{ color: theme.danger, fontWeight: '700', paddingVertical: 3 }}>
+                    {t('unpaid')}: {fmt(obligations!.unpaid_total)} ({obligations!.unpaid_count})
+                  </Text>
+                )}
+                {unallocated > 0.000001 && (
+                  <Text style={{ color: theme.ink, fontWeight: '700', paddingVertical: 3 }}>
+                    {t('unallocated_income')}: {fmt(unallocated)}
+                  </Text>
+                )}
+                {unlinked > 0 && (
+                  <Text style={{ color: theme.ink, fontWeight: '700', paddingVertical: 3 }}>
+                    {t('unlinked_harvests')}: {unlinked}
+                  </Text>
+                )}
+              </Card>
+            )}
+            {tasksStale && (
+              <Card>
+                <Text style={{ color: theme.muted }}>{t('no_tasks_lately')}</Text>
+              </Card>
+            )}
+
+            <SectionTitle title={t('upcoming_payments')} />
+            {(!obligations || obligations.items.length === 0) && (
+              <Card><Text style={{ color: theme.muted }}>{t('nothing_owed')}</Text></Card>
+            )}
+            {(obligations?.items ?? []).map((o) => (
+              <RowCard key={`due-${o.id}`}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '800', color: theme.ink }}>{o.title}</Text>
+                    <Text style={{ fontSize: 12, color: theme.muted }}>{o.farm_title ?? t('unallocated')} · {o.date}{o.overdue ? ` · ${t('overdue')}` : ''}</Text>
+                  </View>
+                  <Text style={{ fontWeight: '800', color: theme.danger }}>{fmt(o.amount)}</Text>
+                </View>
+              </RowCard>
+            ))}
 
             <Card style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
               <View style={{ flex: 1 }}>
@@ -91,6 +155,24 @@ export function OverviewScreen({ navigation }: any) {
                 </RowCard>
               );
             })}
+            <SectionTitle title={t('recent_tasks')} />
+            {tasks.length === 0 && <EmptyState icon="checkbox-outline" title="No tasks yet" />}
+            {tasks.map((x) => (
+              <RowCard key={`task-${x.id}`}>
+                <Text style={{ fontWeight: '800', color: theme.ink }}>{x.title}</Text>
+                <Text style={{ fontSize: 12, color: theme.muted }}>{x.farm_title} · {x.category_name} · {x.date}</Text>
+              </RowCard>
+            ))}
+            <SectionTitle title={t('recent_harvests')} />
+            {harvests.length === 0 && <EmptyState icon="basket-outline" title="No production yet" />}
+            {harvests.map((h) => (
+              <RowCard key={`harvest-${h.id}`}>
+                <Text style={{ fontWeight: '800', color: theme.ink }}>{h.year} · {h.farm_title} · {h.tree_type_name}</Text>
+                <Text style={{ fontSize: 12, color: theme.muted }}>
+                  {fmt(h.quantity)} {h.unit}{h.income_summary ? ` · ${h.income_summary}` : ` · ${t('unlinked')}`}
+                </Text>
+              </RowCard>
+            ))}
           </View>
         )}
       </Screen>

@@ -87,6 +87,9 @@ export interface Expense {
   include_in_tax: number;
   is_paid: number; // 0/1 — unpaid rows feed the obligations report (server 0006)
   is_archived: number; // 0/1 — archived stays in lists/reports, hidden from task dropdowns
+  is_paid: number; // 0/1 — unpaid expenses appear in obligations
+  split_basis: 'trees' | 'tree_type' | 'area' | 'equal';
+  split_tree_type_id: number | null;
   created_at: string;
   updated_at: string;
   farm_title?: string | null;
@@ -139,6 +142,34 @@ export interface FarmTask {
   farm_title?: string;
   category_name?: string;
   planting_label?: string | null;
+}
+
+export type ProductionUnit = 'kg' | 'tn' | 'l';
+
+export interface Production {
+  id: number;
+  profile_id: number;
+  farm_id: number;
+  tree_type_id: number;
+  year: number;
+  quantity: number;
+  unit: ProductionUnit;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  farm_title?: string;
+  tree_type_name?: string;
+  income_summary?: string | null;
+  income_ids?: number[];
+}
+
+export interface ProductionIncomeLink {
+  id: number;
+  profile_id: number;
+  production_id: number;
+  income_id: number;
+  income_title?: string;
+  income_amount?: number;
 }
 
 export interface MonthlyRow {

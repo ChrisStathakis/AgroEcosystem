@@ -18,6 +18,8 @@ export interface TxnFilters {
   is_archived?: boolean;
 }
 
+export type SplitBasis = 'trees' | 'tree_type' | 'area' | 'equal';
+
 function contactColumn(income: boolean): string {
   return income ? 'customer_id' : 'vendor_id';
 }
@@ -121,7 +123,7 @@ export async function listActiveExpensesForTasks(farmId?: number): Promise<Expen
 }
 
 export interface TxnInput {
-  /** null/undefined = shared expense split across farms by tree count. */
+  /** null/undefined = shared expense split across farms by its split basis. */
   farm_id?: number | null;
   category_id: number;
   contact_id?: number | null;
@@ -133,7 +135,8 @@ export interface TxnInput {
   include_in_tax: boolean;
   is_paid?: boolean;
   is_archived?: boolean;
-  allocations?: Array<{ farm_id: number; amount: number }>;
+  split_basis?: SplitBasis;
+  split_tree_type_id?: number | null;
 }
 
 export async function listIncomeAllocations(incomeId: number): Promise<IncomeFarmAllocation[]> {
@@ -158,26 +161,54 @@ function assertTxnCommon(input: { title: string; amount: number; date: string; d
   }
 }
 
+function assertSplitBasis(basis: SplitBasis | undefined, treeTypeId: number | null | undefined) {
+  const b = basis ?? 'trees';
+  if (b !== 'trees' && b !== 'tree_type' && b !== 'area' && b !== 'equal') {
+    throw new Error('Choose a valid split basis.');
+  }
+  if (b === 'tree_type' && !treeTypeId) {
+    throw new Error('Choose a tree/crop for this split basis.');
+  }
+}
+
 export async function createExpense(input: TxnInput): Promise<number> {
   assertTxnCommon(input);
+  assertSplitBasis(input.split_basis, input.split_tree_type_id);
+  const basis = input.split_basis ?? 'trees';
   const db = getDb();
   const now = nowISO();
+  if (input.farm_id) {
+    const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [input.farm_id]);
+    if (!farm || farm.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected farm must belong to this workspace.');
+  } else if (basis === 'tree_type') {
+    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id]);
+    if (!tt || tt.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected tree/crop must belong to this workspace.');
+  }
   const res = await db.runAsync(
-    `INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [SINGLE_PROFILE_ID, input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, now, now],
+    `INSERT INTO expenses (profile_id, farm_id, category_id, vendor_id, title, description, amount, date, document_type, include_in_tax, is_paid, is_archived, split_basis, split_tree_type_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [SINGLE_PROFILE_ID, input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, input.farm_id ? 'trees' : basis, input.farm_id ? null : (input.split_tree_type_id ?? null), now, now],
   );
   return res.lastInsertRowId;
 }
 
 export async function updateExpense(id: number, input: TxnInput): Promise<void> {
   assertTxnCommon(input);
+  assertSplitBasis(input.split_basis, input.split_tree_type_id);
+  const basis = input.split_basis ?? 'trees';
   const db = getDb();
+  if (input.farm_id) {
+    const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [input.farm_id]);
+    if (!farm || farm.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected farm must belong to this workspace.');
+  } else if (basis === 'tree_type') {
+    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id]);
+    if (!tt || tt.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected tree/crop must belong to this workspace.');
+  }
   await db.runAsync(
     `UPDATE expenses SET farm_id = ?, category_id = ?, vendor_id = ?, title = ?, description = ?, amount = ?,
-      date = ?, document_type = ?, include_in_tax = ?, is_paid = ?, is_archived = ?, updated_at = ?
+      date = ?, document_type = ?, include_in_tax = ?, is_paid = ?, is_archived = ?, split_basis = ?, split_tree_type_id = ?, updated_at = ?
      WHERE id = ? AND profile_id = ?`,
-    [input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, nowISO(), id, SINGLE_PROFILE_ID],
+    [input.farm_id ?? null, input.category_id, input.contact_id ?? null, input.title.trim(), input.description ?? '', input.amount, input.date, input.document_type, input.include_in_tax ? 1 : 0, input.is_paid === false ? 0 : 1, input.is_archived ? 1 : 0, input.farm_id ? 'trees' : basis, input.farm_id ? null : (input.split_tree_type_id ?? null), nowISO(), id, SINGLE_PROFILE_ID],
   );
 }
 
@@ -245,6 +276,64 @@ export async function setIncomeArchived(id: number, archived: boolean): Promise<
   await getDb().runAsync('UPDATE incomes SET is_archived = ?, updated_at = ? WHERE id = ? AND profile_id = ?', [
     archived ? 1 : 0, nowISO(), id, SINGLE_PROFILE_ID,
   ]);
+}
+
+/** Weights per farm for an auto-split basis (port of server expenses.models.basis_weights). */
+export async function splitWeights(
+  basis: SplitBasis,
+  treeTypeId?: number | null,
+): Promise<{ weights: Map<number, number>; total: number }> {
+  const db = getDb();
+  const farms = await db.getAllAsync<{ id: number; size: number }>(
+    'SELECT id, size FROM farms WHERE profile_id = ? ORDER BY id', [SINGLE_PROFILE_ID]);
+  const weights = new Map<number, number>();
+  if (basis === 'area') {
+    for (const f of farms) weights.set(f.id, Number(f.size) || 0);
+  } else if (basis === 'tree_type') {
+    if (!treeTypeId) throw new Error('Choose a tree/crop for this split basis.');
+    const rows = await db.getAllAsync<{ farm_id: number; total: number }>(
+      'SELECT farm_id, COALESCE(SUM(count),0) AS total FROM tree_plantings WHERE profile_id = ? AND tree_type_id = ? GROUP BY farm_id',
+      [SINGLE_PROFILE_ID, treeTypeId]);
+    for (const f of farms) weights.set(f.id, 0);
+    for (const r of rows) weights.set(r.farm_id, r.total ?? 0);
+  } else if (basis === 'equal') {
+    for (const f of farms) weights.set(f.id, 1);
+  } else {
+    const rows = await db.getAllAsync<{ farm_id: number; total: number }>(
+      'SELECT farm_id, COALESCE(SUM(count),0) AS total FROM tree_plantings WHERE profile_id = ? GROUP BY farm_id',
+      [SINGLE_PROFILE_ID]);
+    for (const f of farms) weights.set(f.id, 0);
+    for (const r of rows) weights.set(r.farm_id, r.total ?? 0);
+  }
+  const total = [...weights.values()].reduce((a, b) => a + b, 0);
+  return { weights, total };
+}
+
+/** Split an amount across farms by basis, cent-exact (remainder to largest farm). */
+export async function computeAutoSplit(
+  basis: SplitBasis,
+  treeTypeId: number | null | undefined,
+  amount: number,
+): Promise<Array<{ farm_id: number; amount: number }>> {
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter an amount greater than zero.');
+  const { weights, total } = await splitWeights(basis, treeTypeId);
+  if (weights.size === 0) throw new Error('Add a farm first to split across farms.');
+  if (basis === 'tree_type' && total <= 0) throw new Error('No farm has this tree/crop.');
+  const cents = Math.round(amount * 100);
+  const ids = [...weights.keys()];
+  const shares = new Map<number, number>();
+  if (total > 0) {
+    for (const id of ids) shares.set(id, Math.floor((cents * (weights.get(id) ?? 0)) / total));
+  } else {
+    for (const id of ids) shares.set(id, Math.floor(cents / ids.length));
+  }
+  const assigned = [...shares.values()].reduce((a, b) => a + b, 0);
+  let remainder = cents - assigned;
+  const largest = [...ids].sort((a, b) => (weights.get(b) ?? 0) - (weights.get(a) ?? 0) || a - b)[0];
+  if (remainder > 0) shares.set(largest, (shares.get(largest) ?? 0) + remainder);
+  return ids
+    .map((farm_id) => ({ farm_id, amount: (shares.get(farm_id) ?? 0) / 100 }))
+    .filter((s) => s.amount > 0);
 }
 
 export async function deleteExpense(id: number): Promise<void> {

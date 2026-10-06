@@ -39,8 +39,16 @@ class Expense(models.Model):
         INVOICE = "invoice", "Invoice"
         RECEIPT = "receipt", "Receipt"
 
+    class SplitBasis(models.TextChoices):
+        TREES = "trees", "Trees"
+        TREE_TYPE = "tree_type", "Tree variety"
+        AREA = "area", "Area (stremmata)"
+        EQUAL = "equal", "Equal"
+
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name="expenses", editable=False, help_text="Profile that owns this expense.")
-    farm = models.ForeignKey(Farm, on_delete=models.PROTECT, related_name="expenses", blank=True, null=True, help_text="Farm this expense belongs to. Leave empty to split across all farms by tree count.")
+    farm = models.ForeignKey(Farm, on_delete=models.PROTECT, related_name="expenses", blank=True, null=True, help_text="Farm this expense belongs to. Leave empty to split across all farms by the selected basis.")
+    split_basis = models.CharField(max_length=9, choices=SplitBasis.choices, default=SplitBasis.TREES, help_text="How a shared (farm-less) expense is split across farms.")
+    split_tree_type = models.ForeignKey("farm.TreeType", on_delete=models.PROTECT, related_name="split_expenses", blank=True, null=True, help_text="Tree variety used when the split basis is a single variety.")
     category = models.ForeignKey(ExpenseCategory, on_delete=models.PROTECT, related_name="expenses", help_text="Expense category.")
     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT, related_name="expenses", blank=True, null=True, help_text="Optional vendor who received this payment.")
     title = models.CharField(max_length=150, help_text="Short description of the expense.")
@@ -65,6 +73,14 @@ class Expense(models.Model):
             raise ValidationError({"category": "Category must belong to the same profile."})
         if self.vendor_id and self.profile_id and self.vendor.profile_id != self.profile_id:
             raise ValidationError({"vendor": "Vendor must belong to the same profile."})
+        if self.split_tree_type_id and self.profile_id and self.split_tree_type.profile_id != self.profile_id:
+            raise ValidationError({"split_tree_type": "Tree variety must belong to the same profile."})
+        if self.split_basis == self.SplitBasis.TREE_TYPE and not self.split_tree_type_id:
+            raise ValidationError({"split_tree_type": "Choose a tree variety for this split basis."})
+        if self.farm_id and (self.split_basis != self.SplitBasis.TREES or self.split_tree_type_id):
+            # Split settings only apply to shared (farm-less) expenses; reset silently.
+            self.split_basis = self.SplitBasis.TREES
+            self.split_tree_type = None
 
     def __str__(self) -> str:
         return f"{self.title} ({self.amount})"
@@ -78,7 +94,7 @@ class Expense(models.Model):
     def farm_display(self) -> str:
         if self.farm_id:
             return str(self.farm)
-        return "All farms (split by trees)"
+        return "All farms (split)"
 
 
 def farm_tree_weights(profile) -> tuple[dict, int]:
@@ -100,6 +116,72 @@ def farm_tree_weights(profile) -> tuple[dict, int]:
     )
     weights = {farm.pk: int(totals.get(farm.pk) or 0) for farm in farms}
     return weights, sum(weights.values())
+
+
+def farm_area_weights(profile) -> tuple[dict, object]:
+    """Farm sizes (stremmata) per farm for one profile."""
+    from decimal import Decimal
+
+    from farm.models import Farm
+
+    farms = list(Farm.objects.filter(profile=profile).order_by("title"))
+    weights = {farm.pk: Decimal(str(farm.size)) for farm in farms}
+    return weights, sum(weights.values(), Decimal("0"))
+
+
+def farm_tree_type_weights(profile, tree_type) -> tuple[dict, int]:
+    """Tree counts of one variety per farm for one profile."""
+    from django.db.models import Sum
+
+    from farm.models import Farm, TreePlanting
+
+    tree_type_id = tree_type.pk if hasattr(tree_type, "pk") else tree_type
+    farms = list(Farm.objects.filter(profile=profile).order_by("title"))
+    totals = dict(
+        TreePlanting.objects.filter(profile=profile, farm__profile=profile, tree_type_id=tree_type_id)
+        .values("farm_id")
+        .annotate(total=Sum("count"))
+        .values_list("farm_id", "total")
+    )
+    weights = {farm.pk: int(totals.get(farm.pk) or 0) for farm in farms}
+    return weights, sum(weights.values())
+
+
+def basis_weights(profile, basis, tree_type=None) -> tuple[dict, object]:
+    """Weight map + total for a split basis.
+
+    ``basis`` is one of ``trees``/``tree_type``/``area``/``equal``.
+    Returns ``({farm_id: weight}, total)``.
+    """
+    from decimal import Decimal
+
+    from farm.models import Farm
+
+    if basis == "area":
+        return farm_area_weights(profile)
+    if basis == "tree_type":
+        if tree_type is None:
+            raise ValueError("A tree variety is required for this split basis.")
+        return farm_tree_type_weights(profile, tree_type)
+    if basis == "equal":
+        farms = list(Farm.objects.filter(profile=profile).values_list("pk", flat=True))
+        weights = {pk: 1 for pk in farms}
+        return weights, len(weights)
+    return farm_tree_weights(profile)
+
+
+def _weight_ratio(weights: dict, total, farm_id) -> object:
+    """Portion of a weight map attributable to one farm (equal fallback at zero)."""
+    from decimal import Decimal
+
+    if not weights or farm_id not in weights:
+        return Decimal("0")
+    if total and Decimal(str(total)) > 0:
+        return Decimal(str(weights.get(farm_id, 0))) / Decimal(str(total))
+    active = len(weights)
+    if not active:
+        return Decimal("0")
+    return Decimal("1") / Decimal(str(active))
 
 
 def split_amount_by_trees(amount, weights: dict) -> dict:

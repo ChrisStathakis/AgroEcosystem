@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'farm',
     'expenses',
     'incomes',
+    'production',
     'frontend',
     'analytics',
 ]
@@ -80,11 +81,18 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+#
+# Desktop (Electron) bundle override: set AGRO_DB_PATH to keep the SQLite
+# file in the user's data dir (%APPDATA%/Agro) so installers/updates never
+# wipe production data. Defaults to BASE_DIR/db.sqlite3 for dev.
 
+import os
+
+_DB_PATH = os.environ.get("AGRO_DB_PATH")
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': _DB_PATH if _DB_PATH else BASE_DIR / 'db.sqlite3',
     }
 }
 

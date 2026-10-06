@@ -207,9 +207,9 @@ export function AnalyticsScreen() {
 
         <Stats income={summary.income_total} expense={summary.expense_total} balance={summary.balance} />
         <Card>
-          <Row label="Taxable income" value={fmt(summary.taxable_income)} />
-          <Row label="Deductible expenses" value={fmt(summary.deductible_expenses)} />
-          <Row label="Taxable net (guidance)" value={fmt(summary.taxable_net)} bold />
+          <Row label="Taxable income" value={fmt(summary.taxable_income)} tone="green" />
+          <Row label="Deductible expenses" value={fmt(summary.deductible_expenses)} tone="red" />
+          <Row label="Taxable net (guidance)" value={fmt(summary.taxable_net)} bold tone={summary.taxable_net < 0 ? 'red' : 'green'} />
         </Card>
         <View style={{ height: 12 }} />
         <MonthlyChart monthly={summary.monthly.map((m) => ({ ...m, label: localizeMonthLabel(m.label) }))} />
@@ -238,9 +238,13 @@ export function AnalyticsScreen() {
                 <Text style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>in {fmt(farm.income)} · out {fmt(farm.expense)}</Text>
               </RowCard>
             ))}
-            <SectionTitle title="Top categories" />
-            {(cats?.expenses ?? []).map((c) => <RowCard key={`e-${c.label}`}><Text style={{ color: theme.ink }}>E · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
-            {(cats?.incomes ?? []).map((c) => <RowCard key={`i-${c.label}`}><Text style={{ color: theme.ink }}>I · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
+            <SectionTitle title={t('top_categories')} />
+            <CategoryBars title="Top expense categories" tone="red" items={(cats?.expenses ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
+            <View style={{ height: 12 }} />
+            <CategoryBars title="Top income categories" tone="green" items={(cats?.incomes ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
+            <View style={{ height: 12 }} />
+            {(cats?.expenses ?? []).map((c) => <RowCard key={`e-${c.label}`}><Text style={{ color: theme.danger }}>E · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
+            {(cats?.incomes ?? []).map((c) => <RowCard key={`i-${c.label}`}><Text style={{ color: theme.success }}>I · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
           </View>
         )}
         {tab === 'pl' && (
@@ -249,7 +253,7 @@ export function AnalyticsScreen() {
             <Card>
               <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By month</Text>
               {(pl?.monthly ?? summary.monthly).map((m: any) => (
-                <Row key={`${m.year}-${m.month}`} label={localizeMonthLabel(m.label)} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} />
+                <Row key={`${m.year}-${m.month}`} label={localizeMonthLabel(m.label)} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} tone={m.balance < 0 ? 'red' : 'green'} />
               ))}
             </Card>
             <View style={{ height: 10 }} />
@@ -278,7 +282,7 @@ export function AnalyticsScreen() {
             <Card>
               <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Cash flow (running balance)</Text>
               {(cf?.rows ?? []).map((r) => (
-                <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} />
+                <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} tone={r.running < 0 ? 'red' : 'green'} />
               ))}
               {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>No cash movement for these filters.</Text>}
               <Row label={`Total ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
@@ -291,19 +295,19 @@ export function AnalyticsScreen() {
           <Card>
             <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Tax-flagged items</Text>
             <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 6 }}>Control this with the “Tax” checkbox on each income/expense. Guidance only.</Text>
-            {(tax?.incomes ?? []).map((i: any) => <Text key={`i-${i.id}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>+{fmt(i.amount)} · {i.title} · {i.date}</Text>)}
-            {(tax?.expenses ?? []).map((e: any) => <Text key={`e-${e.id}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>−{fmt(e.amount)} · {e.title} · {e.date}</Text>)}
-            <Row label="Taxable income" value={fmt(tax?.income_total ?? 0)} />
-            <Row label="Deductible expenses" value={fmt(tax?.expense_total ?? 0)} />
-            <Row label="Taxable net" value={fmt(tax?.net ?? 0)} bold />
+            {(tax?.incomes ?? []).map((i: any) => <Text key={`i-${i.id}`} style={{ paddingVertical: 3, color: theme.success }}>+{fmt(i.amount)} · {i.title} · {i.date}</Text>)}
+            {(tax?.expenses ?? []).map((e: any) => <Text key={`e-${e.id}`} style={{ paddingVertical: 3, color: theme.danger }}>−{fmt(e.amount)} · {e.title} · {e.date}</Text>)}
+            <Row label="Taxable income" value={fmt(tax?.income_total ?? 0)} tone="green" />
+            <Row label="Deductible expenses" value={fmt(tax?.expense_total ?? 0)} tone="red" />
+            <Row label="Taxable net" value={fmt(tax?.net ?? 0)} bold tone={(tax?.net ?? 0) < 0 ? 'red' : 'green'} />
           </Card>
         )}
         {tab === 'obligations' && (
           <View>
             <SectionTitle title={`${t('obligations')} · ${obl?.period_label ?? summary.period_label}`} />
             <Card>
-              <Row label={t('unpaid_total')} value={fmt(obl?.unpaid_total ?? 0)} />
-              <Row label={t('overdue')} value={fmt(obl?.overdue_total ?? 0)} />
+              <Row label={t('unpaid_total')} value={fmt(obl?.unpaid_total ?? 0)} tone="red" />
+              <Row label={t('overdue')} value={fmt(obl?.overdue_total ?? 0)} tone="red" />
               <Row label={t('open_items')} value={String(obl?.count ?? 0)} bold />
               <Text style={{ color: theme.muted, fontSize: 12, marginTop: 6 }}>{t('obligations_hint')}</Text>
             </Card>
@@ -347,12 +351,12 @@ export function AnalyticsScreen() {
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function Row({ label, value, bold, tone }: { label: string; value: string; bold?: boolean; tone?: 'green' | 'red' }) {
   const theme = useColors();
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, gap: 10 }}>
       <Text style={{ color: theme.muted, fontSize: 13.5, flex: 1 }}>{label}</Text>
-      <Text style={{ color: theme.ink, fontWeight: bold ? '800' : '700', fontSize: 13.5, textAlign: 'right' }}>{value}</Text>
+      <Text style={{ color: tone === 'red' ? theme.danger : tone === 'green' ? theme.success : theme.ink, fontWeight: bold ? '800' : '700', fontSize: 13.5, textAlign: 'right' }}>{value}</Text>
     </View>
   );
 }

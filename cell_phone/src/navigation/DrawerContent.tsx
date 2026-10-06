@@ -11,6 +11,7 @@ const GROUPS: { title: string; items: { route: string; label: string; icon: keyo
     items: [
       { route: 'Overview', label: 'Overview', icon: 'home-outline' },
       { route: 'Farms', label: 'Farms', icon: 'leaf-outline' },
+      { route: 'Production', label: 'Production', icon: 'basket-outline' },
       { route: 'Trees', label: 'Trees', icon: 'nutrition-outline' },
       { route: 'Tasks', label: 'Tasks', icon: 'checkbox-outline' },
     ],
