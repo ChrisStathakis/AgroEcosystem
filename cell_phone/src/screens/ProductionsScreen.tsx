@@ -7,10 +7,10 @@ import { listLookups } from '../db/repositories/lookups';
 import { listIncomes } from '../db/repositories/transactions';
 import type { Farm, Income, NamedRow, ProductionUnit } from '../db/types';
 import { Screen } from './Screen';
-import { t } from '../lib/i18n';
+import { t, useLang } from '../lib/i18n';
 import { exportProductionsAndShare } from '../lib/csv';
 import { fmt, theme } from '../components/theme';
-import { AppButton, AppInput, Badge, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
+import { AppButton, AppInput, Badge, Card, EmptyState, FilterDropdown, RowCard, SearchBar, SectionTitle } from '../components/ui';
 import { Select } from '../components/Select';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
@@ -19,6 +19,8 @@ const UNITS: { id: ProductionUnit; label: string }[] = [
   { id: 'tn', label: 'Tn' },
   { id: 'l', label: 'L' },
 ];
+// Localized labels for the unit dropdown (web: Κιλά/Τόνοι/Λίτρα).
+const unitLabel = (u: ProductionUnit) => t(`unit_${u}`);
 
 const currentYear = new Date().getFullYear();
 
@@ -29,6 +31,7 @@ export function ProductionsScreen() {
   const [filterTypeId, setFilterTypeId] = useState<number | null>(null);
   const [filterYear, setFilterYear] = useState('');
   const [filterLinked, setFilterLinked] = useState<'all' | 'linked' | 'unlinked'>('all');
+  const [filterUnit, setFilterUnit] = useState<'all' | ProductionUnit>('all');
   const [farmId, setFarmId] = useState<number | null>(null);
   const [treeTypeId, setTreeTypeId] = useState<number | null>(null);
   const [year, setYear] = useState(String(currentYear));
@@ -40,16 +43,24 @@ export function ProductionsScreen() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [treeTypes, setTreeTypes] = useState<NamedRow[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
+  useLang();
 
   const refresh = useCallback(async () => {
+    const rawYear = filterYear.trim();
+    const y = rawYear ? Number(rawYear) : undefined;
+    // An invalid year fails the filter (server: invalid form -> no records).
+    const yearOk = !rawYear || (Number.isInteger(y) && (y as number) >= 2000 && (y as number) <= 2100);
     setRows(
-      await listProductions({
-        q: q || undefined,
-        farm_id: filterFarmId ?? undefined,
-        tree_type_id: filterTypeId ?? undefined,
-        year: filterYear ? Number(filterYear) : undefined,
-        linked: filterLinked,
-      }),
+      yearOk
+        ? await listProductions({
+          q: q || undefined,
+          farm_id: filterFarmId ?? undefined,
+          tree_type_id: filterTypeId ?? undefined,
+          year: y,
+          unit: filterUnit === 'all' ? undefined : filterUnit,
+          linked: filterLinked,
+        })
+        : [],
     );
     try {
       setFarms(await listFarms());
@@ -58,7 +69,7 @@ export function ProductionsScreen() {
     } catch {
       // Option lists are best-effort.
     }
-  }, [q, filterFarmId, filterTypeId, filterYear, filterLinked]);
+  }, [q, filterFarmId, filterTypeId, filterYear, filterUnit, filterLinked]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
@@ -81,8 +92,8 @@ export function ProductionsScreen() {
 
   const submit = async () => {
     try {
-      if (!farmId) throw new Error('Select a farm.');
-      if (!treeTypeId) throw new Error('Select a tree type.');
+      if (!farmId) throw new Error(t('msg_select_farm'));
+      if (!treeTypeId) throw new Error(t('msg_select_type'));
       const payload = {
         farm_id: farmId, tree_type_id: treeTypeId, year: Number(year),
         quantity: Number(quantity), unit, notes, income_ids: incomeIds,
@@ -92,7 +103,7 @@ export function ProductionsScreen() {
       reset();
       refresh();
     } catch (e: any) {
-      Alert.alert('Invalid', e.message);
+      Alert.alert(t('msg_invalid'), e.message);
     }
   };
 
@@ -102,18 +113,24 @@ export function ProductionsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Screen title={t('productions')} subtitle="HARVEST PER YEAR AND FARM">
-        <Card>
-          <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-          <Select label={t('farm')} placeholder={t('all_farms')} value={filterFarmId}
+      <Screen title={t('productions')} subtitle={t('sub_production')}>
+        <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
+        <FilterDropdown
+          activeCount={
+            (filterFarmId != null ? 1 : 0) + (filterTypeId != null ? 1 : 0) +
+            (filterYear.trim() ? 1 : 0) + (filterLinked !== 'all' ? 1 : 0) + (filterUnit !== 'all' ? 1 : 0)
+          }
+          onClear={() => { setFilterFarmId(null); setFilterTypeId(null); setFilterYear(''); setFilterLinked('all'); setFilterUnit('all'); }}
+        >
+          <Select label={t('filter_farm')} placeholder={t('all_farms')} value={filterFarmId}
             options={farms.map((x) => ({ id: x.id, label: x.title }))} onChange={setFilterFarmId} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <Select label={t('tree_types')} placeholder={t('all')} value={filterTypeId}
+              <Select label={t('filter_tree_group')} placeholder={t('all')} value={filterTypeId}
                 options={treeTypes.map((x) => ({ id: x.id, label: x.name }))} onChange={setFilterTypeId} />
             </View>
             <View style={{ flex: 1 }}>
-              <AppInput label={t('year')} placeholder={String(currentYear)} value={filterYear} onChangeText={setFilterYear} keyboardType="number-pad" />
+              <AppInput label={t('filter_year')} placeholder={String(currentYear)} value={filterYear} onChangeText={setFilterYear} keyboardType="number-pad" />
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -127,13 +144,24 @@ export function ProductionsScreen() {
               </Pressable>
             ))}
           </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            {(['all', 'kg', 'tn', 'l'] as const).map((v) => (
+              <Pressable key={v} onPress={() => setFilterUnit(v)}
+                style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                  backgroundColor: filterUnit === v ? theme.pine : theme.sage }}>
+                <Text style={{ color: filterUnit === v ? '#fff' : theme.ink, fontWeight: '700', fontSize: 12.5 }}>
+                  {v === 'all' ? t('all') : t(`unit_${v}`)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <View style={{ height: 8 }} />
           <AppButton title={t('apply')} variant="secondary" icon="filter" onPress={refresh} />
-        </Card>
+        </FilterDropdown>
 
-        <SectionTitle title={`${rows.length} records`}
-          action={<AppButton title="Export" variant="ghost" onPress={() => exportProductionsAndShare(rows).catch((e: Error) => Alert.alert('Export failed', e.message))} />} />
-        {rows.length === 0 && <EmptyState icon="basket-outline" title="No production yet" hint="Record harvest per year, farm and tree type." />}
+        <SectionTitle title={`${rows.length} ${t('records')}`}
+          action={<AppButton title={t('btn_export')} variant="ghost" onPress={() => exportProductionsAndShare(rows).catch((e: Error) => Alert.alert(t('msg_export_failed'), e.message))} />} />
+        {rows.length === 0 && <EmptyState icon="basket-outline" title={t('empty_no_production')} hint={t('empty_no_production_hint')} />}
         {rows.map((r) => (
           <RowCard key={r.id}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -148,35 +176,35 @@ export function ProductionsScreen() {
               <Badge label={`${fmt(r.quantity)} ${r.unit}`} tone="green" />
             </View>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-              <View style={{ flex: 1 }}><AppButton title="Edit" variant="secondary" onPress={() => startEdit(r)} /></View>
-              <View style={{ flex: 1 }}><AppButton title="Delete" variant="ghost" onPress={() => deleteProduction(r.id).then(refresh).catch((e: Error) => Alert.alert('Error', e.message))} /></View>
+              <View style={{ flex: 1 }}><AppButton title={t('edit')} variant="secondary" onPress={() => startEdit(r)} /></View>
+              <View style={{ flex: 1 }}><AppButton title={t('del')} variant="ghost" onPress={() => deleteProduction(r.id).then(refresh).catch((e: Error) => Alert.alert(t('msg_error'), e.message))} /></View>
             </View>
           </RowCard>
         ))}
 
         <Card style={{ marginTop: 12 }}>
           <Text style={{ fontWeight: '800', fontSize: 16, color: theme.ink, marginBottom: 8 }}>
-            {editingId ? 'Edit production' : 'Add production'}
+            {editingId ? t('btn_edit_production') : t('btn_add_production')}
           </Text>
-          <Select label={t('farm')} placeholder="Select farm…" value={farmId}
+          <Select label={t('form_farm')} placeholder={t('form_select_farm')} value={farmId}
             options={farms.map((x) => ({ id: x.id, label: x.title }))} onChange={setFarmId} allowClear={false} />
-          <Select label={t('tree_types')} placeholder="Select…" value={treeTypeId}
+          <Select label={t('tree_types')} placeholder={t('form_select_one')} value={treeTypeId}
             options={treeTypes.map((x) => ({ id: x.id, label: x.name }))} onChange={setTreeTypeId} allowClear={false} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <AppInput label={t('year')} value={year} onChangeText={setYear} keyboardType="number-pad" />
+              <AppInput label={t('form_year')} value={year} onChangeText={setYear} keyboardType="number-pad" />
             </View>
             <View style={{ flex: 1 }}>
-              <AppInput label={t('quantity')} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" />
+              <AppInput label={t('form_quantity')} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" />
             </View>
             <View style={{ flex: 1 }}>
-              <Select label={t('unit')} value={unit} options={UNITS as any}
-                onChange={(v) => setUnit((v as ProductionUnit) ?? 'kg')} allowClear={false} />
+              <Select label={t('filter_unit')} value={unit as any} options={UNITS.map((u) => ({ id: u.id, label: unitLabel(u.id) })) as any}
+                onChange={(v) => setUnit(((v as any) as ProductionUnit) ?? 'kg')} allowClear={false} />
             </View>
           </View>
-          <AppInput label="Notes" placeholder="Optional" value={notes} onChangeText={setNotes} />
+          <AppInput label={t('form_notes')} placeholder={t('form_optional')} value={notes} onChangeText={setNotes} />
           <Text style={{ fontWeight: '800', marginTop: 8, marginBottom: 6, color: theme.ink }}>{t('incomes_linked')} ({t('unlinked')} ok)</Text>
-          {incomes.slice(0, 30).map((inc) => {
+          {incomes.map((inc) => {
             const active = incomeIds.includes(inc.id);
             return (
               <Pressable key={inc.id} onPress={() => toggleIncome(inc.id)}
@@ -192,9 +220,9 @@ export function ProductionsScreen() {
             );
           })}
           <View style={{ height: 8 }} />
-          <AppButton title={editingId ? 'Save' : 'Create'} icon="checkmark-circle" onPress={submit} />
+          <AppButton title={editingId ? t('save') : t('create')} icon="checkmark-circle" onPress={submit} />
           {editingId ? <View style={{ height: 8 }} /> : null}
-          {editingId ? <AppButton title="Cancel" variant="ghost" onPress={reset} /> : null}
+          {editingId ? <AppButton title={t('cancel')} variant="ghost" onPress={reset} /> : null}
         </Card>
       </Screen>
       <FloatingTabBar />

@@ -3,6 +3,7 @@ import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from './theme';
 import { SearchBar } from './ui';
+import { t, useLang } from '../lib/i18n';
 
 export interface SelectOption {
   id: number;
@@ -28,7 +29,9 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const theme = useColors();
+  useLang();
   const styles = useSelectStyles();
+  const ph = placeholder ?? t('form_select_one');
 
   const selected = useMemo(() => options.find((o) => o.id === value) ?? null, [options, value]);
   const filtered = useMemo(() => {
@@ -44,7 +47,7 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={label ?? placeholder ?? 'Select'}
+        accessibilityLabel={label ?? ph}
         disabled={disabled}
         onPress={() => {
           setQuery('');
@@ -53,7 +56,7 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
         style={[styles.field, disabled && { opacity: 0.55 }]}
       >
         <Text style={[styles.fieldText, !selected && { color: theme.faint }]} numberOfLines={1}>
-          {selected ? selected.label : placeholder ?? 'Select…'}
+          {selected ? selected.label : ph}
         </Text>
         <Ionicons name="chevron-down" size={17} color={theme.muted} />
       </Pressable>
@@ -61,12 +64,12 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
       <Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
         <View style={styles.sheet}>
           <View style={styles.header}>
-            <Text style={styles.title}>{label ?? placeholder ?? 'Select'}</Text>
+            <Text style={styles.title}>{label ?? ph}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(false)} style={styles.close}>
               <Ionicons name="close" size={20} color={theme.ink} />
             </Pressable>
           </View>
-          <SearchBar value={query} onChange={setQuery} placeholder="Search…" />
+          <SearchBar value={query} onChange={setQuery} placeholder={t('ph_search')} />
           {allowClear ? (
             <Pressable
               accessibilityRole="button"
@@ -77,14 +80,14 @@ export function Select({ label, placeholder, value, options, onChange, allowClea
               style={styles.clearRow}
             >
               <Ionicons name="ban-outline" size={16} color={theme.muted} />
-              <Text style={styles.clearText}>Clear selection</Text>
+              <Text style={styles.clearText}>{t('clear')}</Text>
             </Pressable>
           ) : null}
           <FlatList
             data={filtered}
             keyExtractor={(item) => String(item.id)}
             keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={<Text style={styles.empty}>No matches. Create the item first in its own screen.</Text>}
+            ListEmptyComponent={<Text style={styles.empty}>{t('empty_no_matches_create')}</Text>}
             renderItem={({ item }) => {
               const active = item.id === value;
               return (

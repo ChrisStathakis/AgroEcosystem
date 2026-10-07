@@ -2,8 +2,9 @@ import React from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../components/theme';
+import { t, useLang } from '../lib/i18n';
 
 export function Screen({
   title,
@@ -22,13 +23,15 @@ export function Screen({
 }) {
   const theme = useColors();
   const styles = useScreenStyles();
+  const insets = useSafeAreaInsets();
+  useLang();
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.hero}>
         <LinearGradient colors={[theme.heroA, theme.heroB] as const} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
         <Animated.View entering={FadeInDown.duration(380)} style={styles.heroInner}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.eyebrow}>{subtitle ?? 'YOUR FARM, IN FOCUS'}</Text>
+            <Text style={styles.eyebrow}>{subtitle ?? t('sub_default')}</Text>
             <Text style={styles.title}>{title}</Text>
           </View>
           {headerAction}
@@ -36,7 +39,7 @@ export function Screen({
       </View>
       <ScrollView
         style={styles.wrap}
-        contentContainerStyle={styles.body}
+        contentContainerStyle={[styles.body, { paddingBottom: 130 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={theme.pine} /> : undefined}
       >

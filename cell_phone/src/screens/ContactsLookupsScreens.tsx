@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { createContact, deleteContact, listCustomers, listVendors, updateContact } from '../db/repositories/contacts';
 import { createLookup, deleteLookup, listLookups, updateLookup, type LookupTable } from '../db/repositories/lookups';
 import { Screen } from './Screen';
-import { t } from '../lib/i18n';
+import { t, useLang } from '../lib/i18n';
 import { AppButton, AppInput, AvatarDot, Card, EmptyState, RowCard, SearchBar, SectionTitle } from '../components/ui';
 import { useColors } from '../components/theme';
 
@@ -19,6 +19,7 @@ export function ContactsScreen({ route }: any) {
   const [notes, setNotes] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const theme = useColors();
+  useLang();
   const refresh = useCallback(async () => {
     setRows(kind === 'vendors' ? await listVendors(q) : await listCustomers(q));
   }, [q, kind]);
@@ -35,16 +36,16 @@ export function ContactsScreen({ route }: any) {
       reset();
       refresh();
     } catch (e: any) {
-      Alert.alert('Invalid', e.message);
+      Alert.alert(t('msg_invalid'), e.message);
     }
   };
 
   return (
-    <Screen title={kind === 'vendors' ? t('vendors') : t('customers')} subtitle={kind === 'vendors' ? 'WHO YOU BUY FROM' : 'WHO BUYS FROM YOU'}>
+    <Screen title={kind === 'vendors' ? t('vendors') : t('customers')} subtitle={kind === 'vendors' ? t('sub_vendors') : t('sub_customers')}>
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-      <AppButton title="Search" variant="secondary" icon="search" onPress={refresh} />
-      <SectionTitle title={`${rows.length} contacts`} />
-      {rows.length === 0 && <EmptyState icon="people-outline" title="No contacts" hint="Add vendors or customers to link transactions." />}
+      <AppButton title={t('btn_search')} variant="secondary" icon="search" onPress={refresh} />
+      <SectionTitle title={`${rows.length} ${t('contacts')}`} />
+      {rows.length === 0 && <EmptyState icon="people-outline" title={t('empty_no_contacts')} hint={t('empty_no_contacts_hint')} />}
       {rows.map((r) => (
         <RowCard key={r.id}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -59,7 +60,7 @@ export function ContactsScreen({ route }: any) {
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
             <View style={{ flex: 1 }}>
               <AppButton
-                title="Edit"
+                title={t('edit')}
                 variant="secondary"
                 onPress={() => {
                   setEditingId(r.id);
@@ -69,21 +70,21 @@ export function ContactsScreen({ route }: any) {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <AppButton title="Delete" variant="ghost" onPress={() => deleteContact(kind, r.id).then(refresh).catch((e: Error) => Alert.alert('Blocked', e.message))} />
+              <AppButton title={t('del')} variant="ghost" onPress={() => deleteContact(kind, r.id).then(refresh).catch((e: Error) => Alert.alert(t('msg_blocked'), e.message))} />
             </View>
           </View>
         </RowCard>
       ))}
       <Card style={{ marginTop: 12 }}>
-        <Text style={{ fontWeight: '800', fontSize: 16, color: theme.ink, marginBottom: 8 }}>{editingId ? 'Edit contact' : 'New contact'}</Text>
-        <AppInput label="Name" value={name} onChangeText={setName} icon="person-outline" />
-        <AppInput label="Phone" placeholder="Optional" value={phone} onChangeText={setPhone} keyboardType="phone-pad" icon="call-outline" />
-        <AppInput label="Email" placeholder="Optional" value={email} onChangeText={setEmail} keyboardType="email-address" icon="mail-outline" />
-        <AppInput label="Address" placeholder="Optional" value={address} onChangeText={setAddress} icon="location-outline" />
-        <AppInput label="Notes" placeholder="Optional" value={notes} onChangeText={setNotes} icon="document-text-outline" />
-        <AppButton title={editingId ? 'Save' : 'Create'} icon="checkmark-circle" onPress={submit} />
+        <Text style={{ fontWeight: '800', fontSize: 16, color: theme.ink, marginBottom: 8 }}>{editingId ? t('btn_edit_contact') : t('btn_new_contact')}</Text>
+        <AppInput label={t('name')} value={name} onChangeText={setName} icon="person-outline" />
+        <AppInput label={t('phone')} placeholder={t('form_optional')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" icon="call-outline" />
+        <AppInput label={t('email')} placeholder={t('form_optional')} value={email} onChangeText={setEmail} keyboardType="email-address" icon="mail-outline" />
+        <AppInput label={t('address')} placeholder={t('form_optional')} value={address} onChangeText={setAddress} icon="location-outline" />
+        <AppInput label={t('notes')} placeholder={t('form_optional')} value={notes} onChangeText={setNotes} icon="document-text-outline" />
+        <AppButton title={editingId ? t('save') : t('create')} icon="checkmark-circle" onPress={submit} />
         {editingId ? <View style={{ height: 8 }} /> : null}
-        {editingId ? <AppButton title="Cancel" variant="ghost" onPress={reset} /> : null}
+        {editingId ? <AppButton title={t('cancel')} variant="ghost" onPress={reset} /> : null}
       </Card>
     </Screen>
   );
@@ -102,11 +103,12 @@ export function LookupsScreen({ route }: any) {
   const [name, setName] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const theme = useColors();
+  useLang();
   const refresh = useCallback(async () => setRows(await listLookups(table)), [table]);
   useFocusEffect(useCallback(() => { refresh(); setEditingId(null); setName(''); }, [refresh]));
   return (
-    <Screen title={t(LOOKUP_TITLES[table])} subtitle="KEEP LISTS TIDY">
-      {rows.length === 0 && <EmptyState icon="pricetags-outline" title="No entries" hint="Add your first item below." />}
+    <Screen title={t(LOOKUP_TITLES[table])} subtitle={t('sub_lists')}>
+      {rows.length === 0 && <EmptyState icon="pricetags-outline" title={t('empty_no_entries')} hint={t('empty_no_entries_hint')} />}
       {rows.map((r) => (
         <RowCard key={r.id}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -116,7 +118,7 @@ export function LookupsScreen({ route }: any) {
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
             <View style={{ flex: 1 }}>
               <AppButton
-                title="Edit"
+                title={t('edit')}
                 variant="secondary"
                 onPress={() => {
                   setEditingId(r.id);
@@ -125,15 +127,15 @@ export function LookupsScreen({ route }: any) {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <AppButton title="Delete" variant="ghost" onPress={() => deleteLookup(table, r.id).then(refresh).catch((e: Error) => Alert.alert('Blocked', e.message))} />
+              <AppButton title={t('del')} variant="ghost" onPress={() => deleteLookup(table, r.id).then(refresh).catch((e: Error) => Alert.alert(t('msg_blocked'), e.message))} />
             </View>
           </View>
         </RowCard>
       ))}
       <Card style={{ marginTop: 12 }}>
-        <AppInput label="Name" value={name} onChangeText={setName} icon="pricetag-outline" />
+        <AppInput label={t('form_name')} value={name} onChangeText={setName} icon="pricetag-outline" />
         <AppButton
-          title={editingId ? 'Save' : 'Create'}
+          title={editingId ? t('save') : t('create')}
           icon="checkmark-circle"
           onPress={async () => {
             try {
@@ -143,12 +145,12 @@ export function LookupsScreen({ route }: any) {
               setEditingId(null);
               refresh();
             } catch (e: any) {
-              Alert.alert('Invalid', e.message);
+              Alert.alert(t('msg_invalid'), e.message);
             }
           }}
         />
         {editingId ? <View style={{ height: 8 }} /> : null}
-        {editingId ? <AppButton title="Cancel" variant="ghost" onPress={() => { setEditingId(null); setName(''); }} /> : null}
+        {editingId ? <AppButton title={t('cancel')} variant="ghost" onPress={() => { setEditingId(null); setName(''); }} /> : null}
       </Card>
     </Screen>
   );

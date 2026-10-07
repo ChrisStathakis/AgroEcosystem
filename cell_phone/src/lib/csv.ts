@@ -129,8 +129,7 @@ export function obligationsToCSV(data: {
   }
   lines.push('');
   lines.push(['unpaid total', '', '', '', '', money(data.unpaid_total), ''].join(','));
-  lines.push(['overdue', '', '', '', '', money(data.overdue_total), ''].join(','));
-  lines.push(['open items', '', '', '', '', String(data.count), ''].join(','));
+  lines.push(['overdue total', '', '', '', '', money(data.overdue_total), ''].join(','));
   return lines.join('\n');
 }
 
@@ -169,7 +168,9 @@ export async function exportProductionsAndShare(rows: Production[]): Promise<str
 }
 
 export async function exportReportAndShare(name: string, csv: string): Promise<string> {
-  const file = new File(Paths.cache, `${name}.csv`);
+  // Sanitize like server analytics_export (no spaces/en-dashes in filenames).
+  const safe = name.replace(/ – /g, '_').replace(/ /g, '') || 'all';
+  const file = new File(Paths.cache, `${safe}.csv`);
   file.write(csv);
   if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: 'text/csv' });
   return file.uri;

@@ -8,7 +8,7 @@ import { HeroBalance, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { AppButton, Card, EmptyState, RowCard, SectionTitle, Skeleton } from '../components/ui';
 import { fmt, useColors } from '../components/theme';
-import { localizeMonthLabel, t } from '../lib/i18n';
+import { localizeMonthLabel, t, useLang } from '../lib/i18n';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 export function OverviewScreen({ navigation }: any) {
@@ -22,6 +22,7 @@ export function OverviewScreen({ navigation }: any) {
   const [tasksStale, setTasksStale] = useState(false);
   const [loading, setLoading] = useState(true);
   const theme = useColors();
+  useLang();
 
   useFocusEffect(
     useCallback(() => {
@@ -36,10 +37,14 @@ export function OverviewScreen({ navigation }: any) {
           setUnallocated(await unallocatedIncomeTotal());
           setUnlinked(await unlinkedProductionsCount());
           const last = await lastTaskDate();
+          // Date-based like the server ((today - last.date).days > 14).
           if (!last) setTasksStale(true);
           else {
-            const days = Math.floor((Date.now() - new Date(last).getTime()) / 86400000);
-            setTasksStale(days > 14);
+            const d = new Date();
+            const today = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            const [y, m, day] = String(last).slice(0, 10).split('-').map(Number);
+            const lastDate = new Date(y, (m ?? 1) - 1, day ?? 1);
+            setTasksStale(Math.round((today.getTime() - lastDate.getTime()) / 86400000) > 14);
           }
         } finally {
           setLoading(false);
@@ -50,7 +55,7 @@ export function OverviewScreen({ navigation }: any) {
 
   return (
     <View style={{ flex: 1 }}>
-      <Screen title={`${t('overview')}${summary ? ` · ${summary.period_label}` : ''}`} subtitle="THE BIG PICTURE">
+      <Screen title={`${t('overview')}${summary ? ` · ${summary.period_label}` : ''}`} subtitle={t('sub_overview')}>
         {loading && !summary ? (
           <View>
             <Skeleton height={150} />
@@ -65,7 +70,7 @@ export function OverviewScreen({ navigation }: any) {
 
             {((obligations && (obligations.overdue_count > 0 || obligations.unpaid_count > 0)) || unallocated > 0.000001 || unlinked > 0) && (
               <Card>
-                <Text style={{ fontWeight: '800', color: theme.ink, fontSize: 15, marginBottom: 8 }}>⚠ Attention</Text>
+                <Text style={{ fontWeight: '800', color: theme.ink, fontSize: 15, marginBottom: 8 }}>{t('attention')}</Text>
                 {(obligations?.overdue_count ?? 0) > 0 && (
                   <Text style={{ color: theme.danger, fontWeight: '700', paddingVertical: 3 }}>
                     {t('overdue')}: {fmt(obligations!.overdue_total)} ({obligations!.overdue_count})
@@ -112,18 +117,18 @@ export function OverviewScreen({ navigation }: any) {
 
             <Card style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
               <View style={{ flex: 1 }}>
-                <AppButton title="Add expense" icon="remove-circle-outline" variant="primary" onPress={() => navigation.navigate('Expenses')} />
+                <AppButton title={t('btn_add_expense')} icon="remove-circle-outline" variant="primary" onPress={() => navigation.navigate('Expenses')} />
               </View>
               <View style={{ flex: 1 }}>
-                <AppButton title="Record income" icon="add-circle-outline" variant="secondary" onPress={() => navigation.navigate('Incomes')} />
+                <AppButton title={t('btn_record_income')} icon="add-circle-outline" variant="secondary" onPress={() => navigation.navigate('Incomes')} />
               </View>
             </Card>
             <View style={{ marginTop: 4 }}>
-              <AppButton title="View analytics" icon="bar-chart-outline" variant="ghost" onPress={() => navigation.navigate('Analytics')} />
+              <AppButton title={t('btn_view_analytics')} icon="bar-chart-outline" variant="ghost" onPress={() => navigation.navigate('Analytics')} />
             </View>
 
             <SectionTitle title={t('latest_activity')} />
-            {recent.length === 0 && <EmptyState icon="receipt-outline" title="No transactions yet" hint="Start with a farm and a category." />}
+            {recent.length === 0 && <EmptyState icon="receipt-outline" title={t('empty_no_tx')} hint={t('empty_no_tx_hint')} />}
             {recent.map((r) => {
               const isOut = r.kind === 'expenses';
               return (
@@ -156,7 +161,7 @@ export function OverviewScreen({ navigation }: any) {
               );
             })}
             <SectionTitle title={t('recent_tasks')} />
-            {tasks.length === 0 && <EmptyState icon="checkbox-outline" title="No tasks yet" />}
+            {tasks.length === 0 && <EmptyState icon="checkbox-outline" title={t('empty_no_tasks')} />}
             {tasks.map((x) => (
               <RowCard key={`task-${x.id}`}>
                 <Text style={{ fontWeight: '800', color: theme.ink }}>{x.title}</Text>
@@ -164,7 +169,7 @@ export function OverviewScreen({ navigation }: any) {
               </RowCard>
             ))}
             <SectionTitle title={t('recent_harvests')} />
-            {harvests.length === 0 && <EmptyState icon="basket-outline" title="No production yet" />}
+            {harvests.length === 0 && <EmptyState icon="basket-outline" title={t('empty_no_production')} />}
             {harvests.map((h) => (
               <RowCard key={`harvest-${h.id}`}>
                 <Text style={{ fontWeight: '800', color: theme.ink }}>{h.year} · {h.farm_title} · {h.tree_type_name}</Text>

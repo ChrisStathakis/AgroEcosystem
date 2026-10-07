@@ -87,7 +87,6 @@ export interface Expense {
   include_in_tax: number;
   is_paid: number; // 0/1 — unpaid rows feed the obligations report (server 0006)
   is_archived: number; // 0/1 — archived stays in lists/reports, hidden from task dropdowns
-  is_paid: number; // 0/1 — unpaid expenses appear in obligations
   split_basis: 'trees' | 'tree_type' | 'area' | 'equal';
   split_tree_type_id: number | null;
   created_at: string;
@@ -247,4 +246,10 @@ export interface ObligationsReport {
 
 export const SINGLE_PROFILE_ID = 1;
 export const nowISO = () => new Date().toISOString();
-export const todayISODate = () => new Date().toISOString().slice(0, 10);
+// Local calendar date (server uses timezone.localdate, not UTC).
+export const todayISODate = () => {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};

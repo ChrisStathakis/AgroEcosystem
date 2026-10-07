@@ -9,12 +9,12 @@ import { listFarms } from '../db/repositories/farms';
 import { listLookups } from '../db/repositories/lookups';
 import { listCustomers, listVendors } from '../db/repositories/contacts';
 import type { AnalyticsFilters, CashFlowRow, CategoryTotal, FarmProfitRow, FinancialSummary, MonthlyRow, ObligationsReport } from '../db/types';
-import { CumulativeBars, MonthlyChart, Stats } from '../components/panels';
+import { CategoryBars, CumulativeBars, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { fmt, useColors } from '../components/theme';
 import { cashFlowToCSV, exportReportAndShare, obligationsToCSV, overviewToCSV, profitLossToCSV, taxToCSV } from '../lib/csv';
-import { localizeCategoryName, localizeFarmName, localizeMonthLabel, t } from '../lib/i18n';
-import { AppButton, AppInput, AppSelect, Badge, Card, EmptyState, RowCard, SegmentedTabs, SectionTitle, Skeleton, type SelectOption } from '../components/ui';
+import { localizeCategoryName, localizeFarmName, localizeMonthLabel, t, useLang } from '../lib/i18n';
+import { AppButton, AppInput, AppSelect, Badge, Card, EmptyState, FilterDropdown, RowCard, SegmentedTabs, SectionTitle, Skeleton, type SelectOption } from '../components/ui';
 import { FloatingTabBar } from '../navigation/FloatingTabBar';
 
 type Tab = 'overview' | 'pl' | 'cf' | 'tax' | 'obligations';
@@ -31,6 +31,7 @@ interface FilterOptions {
 
 export function AnalyticsScreen() {
   const theme = useColors();
+  const lang = useLang();
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [farms, setFarms] = useState<FarmProfitRow[]>([]);
   const [cats, setCats] = useState<{ expenses: CategoryTotal[]; incomes: CategoryTotal[] } | null>(null);
@@ -68,7 +69,7 @@ export function AnalyticsScreen() {
     if (customerId) f.customer_id = Number(customerId);
     if (doc) f.document_type = doc;
     return f;
-  }, [year, start, end, farmId, expenseCat, incomeCat, vendorId, customerId, doc, taxF]);
+  }, [year, start, end, farmId, expenseCat, incomeCat, vendorId, customerId, doc, taxF, lang]);
 
   const loadOptions = useCallback(async () => {
     const [farmRows, eCats, iCats, vendors, customers] = await Promise.all([
@@ -85,6 +86,12 @@ export function AnalyticsScreen() {
 
   const load = useCallback(async () => {
     const f = filters();
+    // Reversed range matches nothing (server: invalid range -> empty records).
+    if (f.start && f.end && f.start > f.end) {
+      setSummary(null);
+      setDesc(t('no_data_filters'));
+      return;
+    }
     const s = await financialSummary(f);
     setSummary(s);
     setFarms(await farmProfit(f));
@@ -126,7 +133,7 @@ export function AnalyticsScreen() {
         await exportReportAndShare(`analytics-tax-${tx.period_label}`, taxToCSV(tx as any));
       }
     } catch (e: any) {
-      Alert.alert('Export failed', e.message);
+      Alert.alert(t('msg_export_failed'), e.message);
     }
   };
 
@@ -134,72 +141,78 @@ export function AnalyticsScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Screen title={`${t('analytics')} · ${summary.period_label}`} subtitle="KNOW YOUR NUMBERS">
+      <Screen title={`${t('analytics')} · ${summary.period_label}`} subtitle={t('sub_analytics')}>
         <Text style={{ color: theme.muted, fontSize: 12.5, marginBottom: 4 }}>{desc}</Text>
         <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          <Badge label={`Years: ${years.join(', ') || '—'}`} tone="neutral" />
+          <Badge label={`${t('filter_year')}: ${years.join(', ') || '—'}`} tone="neutral" />
         </View>
-        <Card>
+        <FilterDropdown
+          activeCount={
+            (start || end ? 1 : 0) + (farmId ? 1 : 0) + (expenseCat ? 1 : 0) + (incomeCat ? 1 : 0) +
+            (vendorId ? 1 : 0) + (customerId ? 1 : 0) + (doc ? 1 : 0) + (taxF !== 'all' ? 1 : 0)
+          }
+          onClear={resetFilters}
+        >
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}><AppInput label="Year" value={year} onChangeText={setYear} keyboardType="number-pad" /></View>
+            <View style={{ flex: 1 }}><AppInput label={t('filter_year')} value={year} onChangeText={setYear} keyboardType="number-pad" /></View>
             <View style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: 10 }}>
-              <AppButton title="Reset" variant="ghost" onPress={resetFilters} />
+              <AppButton title={t('btn_reset')} variant="ghost" onPress={resetFilters} />
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}><AppInput label="From YYYY-MM-DD" placeholder="From YYYY-MM-DD" value={start} onChangeText={setStart} /></View>
-            <View style={{ flex: 1 }}><AppInput label="To YYYY-MM-DD" placeholder="To YYYY-MM-DD" value={end} onChangeText={setEnd} /></View>
+            <View style={{ flex: 1 }}><AppInput label={t('ph_from')} placeholder={t('ph_from')} value={start} onChangeText={setStart} /></View>
+            <View style={{ flex: 1 }}><AppInput label={t('ph_to')} placeholder={t('ph_to')} value={end} onChangeText={setEnd} /></View>
           </View>
-          <AppSelect label="Farm" placeholder="All farms" value={farmId || null} options={opts.farms} onChange={(id) => setFarmId(id == null ? '' : String(id))} />
+          <AppSelect label={t('form_farm')} placeholder={t('all_farms')} value={farmId || null} options={opts.farms} onChange={(id) => setFarmId(id == null ? '' : String(id))} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <AppSelect label="Expense category" placeholder="All" value={expenseCat || null} options={opts.expenseCats} onChange={(id) => setExpenseCat(id == null ? '' : String(id))} />
+              <AppSelect label={t('expense_categories')} placeholder={t('all')} value={expenseCat || null} options={opts.expenseCats} onChange={(id) => setExpenseCat(id == null ? '' : String(id))} />
             </View>
             <View style={{ flex: 1 }}>
-              <AppSelect label="Income category" placeholder="All" value={incomeCat || null} options={opts.incomeCats} onChange={(id) => setIncomeCat(id == null ? '' : String(id))} />
+              <AppSelect label={t('income_categories')} placeholder={t('all')} value={incomeCat || null} options={opts.incomeCats} onChange={(id) => setIncomeCat(id == null ? '' : String(id))} />
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <AppSelect label="Vendor" placeholder="All vendors" value={vendorId || null} options={opts.vendors} onChange={(id) => setVendorId(id == null ? '' : String(id))} />
+              <AppSelect label={t('filter_vendor')} placeholder={t('form_all_vendors')} value={vendorId || null} options={opts.vendors} onChange={(id) => setVendorId(id == null ? '' : String(id))} />
             </View>
             <View style={{ flex: 1 }}>
-              <AppSelect label="Customer" placeholder="All customers" value={customerId || null} options={opts.customers} onChange={(id) => setCustomerId(id == null ? '' : String(id))} />
+              <AppSelect label={t('filter_customer')} placeholder={t('form_all_customers')} value={customerId || null} options={opts.customers} onChange={(id) => setCustomerId(id == null ? '' : String(id))} />
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <AppSelect
-                label="Document"
-                placeholder="All documents"
+                label={t('filter_doc')}
+                placeholder={t('form_all_docs')}
                 value={doc || null}
-                options={[{ id: 'invoice', label: 'Invoice' }, { id: 'receipt', label: 'Receipt' }]}
+                options={[{ id: 'invoice', label: t('invoice') }, { id: 'receipt', label: t('receipt') }]}
                 onChange={(id) => setDoc((id as DocFilter) ?? '')}
               />
             </View>
             <View style={{ flex: 1 }}>
               <AppSelect
-                label="Tax"
-                placeholder="All records"
+                label={t('filter_tax')}
+                placeholder={t('all_records')}
                 value={taxF}
-                options={[{ id: 'all', label: 'All records' }, { id: 'taxed', label: 'Tax flagged only' }, { id: 'untaxed', label: 'Unflagged only' }]}
+                options={[{ id: 'all', label: t('all_records') }, { id: 'taxed', label: t('taxed_flag') }, { id: 'untaxed', label: t('untaxed_flag') }]}
                 onChange={(id) => setTaxF(((id as TaxFilter) ?? 'all'))}
                 allowClear={false}
               />
             </View>
           </View>
-          <AppButton title="Apply" variant="secondary" icon="filter" onPress={load} />
-        </Card>
+          <AppButton title={t('apply')} variant="secondary" icon="filter" onPress={load} />
+        </FilterDropdown>
 
         <View style={{ marginTop: 12 }}>
           <SegmentedTabs<Tab>
             value={tab}
             onChange={setTab}
             options={[
-              { id: 'overview', label: 'Overview' },
+              { id: 'overview', label: t('overview') },
               { id: 'pl', label: 'P&L' },
-              { id: 'cf', label: 'Cash' },
-              { id: 'tax', label: 'Tax' },
+              { id: 'cf', label: t('tab_cash') },
+              { id: 'tax', label: t('form_tax') },
               { id: 'obligations', label: t('obligations') },
             ]}
           />
@@ -207,9 +220,9 @@ export function AnalyticsScreen() {
 
         <Stats income={summary.income_total} expense={summary.expense_total} balance={summary.balance} />
         <Card>
-          <Row label="Taxable income" value={fmt(summary.taxable_income)} tone="green" />
-          <Row label="Deductible expenses" value={fmt(summary.deductible_expenses)} tone="red" />
-          <Row label="Taxable net (guidance)" value={fmt(summary.taxable_net)} bold tone={summary.taxable_net < 0 ? 'red' : 'green'} />
+          <Row label={t('row_taxable_income')} value={fmt(summary.taxable_income)} tone="green" />
+          <Row label={t('row_deductible')} value={fmt(summary.deductible_expenses)} tone="red" />
+          <Row label={t('row_taxable_net')} value={fmt(summary.taxable_net)} bold tone={summary.taxable_net < 0 ? 'red' : 'green'} />
         </Card>
         <View style={{ height: 12 }} />
         <MonthlyChart monthly={summary.monthly.map((m) => ({ ...m, label: localizeMonthLabel(m.label) }))} />
@@ -217,15 +230,15 @@ export function AnalyticsScreen() {
 
         {tab === 'overview' && (
           <View>
-            <SectionTitle title="Monthly breakdown" />
+            <SectionTitle title={t('sec_monthly_breakdown')} />
             <Card>
               {(summary.monthly ?? []).map((m) => (
                 <Row key={`${m.year}-${m.month}`} label={`${localizeMonthLabel(m.label)}`} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} />
               ))}
-              <Row label="Period total" value={fmt(summary.balance)} bold />
+              <Row label={t('row_period_total')} value={fmt(summary.balance)} bold />
             </Card>
-            <SectionTitle title="Profit per farm" />
-            {farms.length === 0 && <EmptyState icon="leaf-outline" title="No farm profit yet" />}
+            <SectionTitle title={t('sec_profit_farm')} />
+            {farms.length === 0 && <EmptyState icon="leaf-outline" title={t('empty_no_profit')} />}
             {farms.map((farm) => (
               <RowCard key={farm.farm}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -235,13 +248,13 @@ export function AnalyticsScreen() {
                 <View style={{ height: 8, borderRadius: 5, backgroundColor: theme.neutralSoft, marginTop: 8, overflow: 'hidden' }}>
                   <View style={{ height: 8, borderRadius: 5, width: `${Math.max(4, (Math.abs(farm.net) / maxFarm) * 100)}%`, backgroundColor: farm.net < 0 ? theme.danger : theme.pine }} />
                 </View>
-                <Text style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>in {fmt(farm.income)} · out {fmt(farm.expense)}</Text>
+                <Text style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>{t('in_short')} {fmt(farm.income)} · {t('out_short')} {fmt(farm.expense)}</Text>
               </RowCard>
             ))}
             <SectionTitle title={t('top_categories')} />
-            <CategoryBars title="Top expense categories" tone="red" items={(cats?.expenses ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
+            <CategoryBars title={t('cat_top_expense')} tone="red" items={(cats?.expenses ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
             <View style={{ height: 12 }} />
-            <CategoryBars title="Top income categories" tone="green" items={(cats?.incomes ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
+            <CategoryBars title={t('cat_top_income')} tone="green" items={(cats?.incomes ?? []).map((c) => ({ label: localizeCategoryName(c.label), total: c.total }))} />
             <View style={{ height: 12 }} />
             {(cats?.expenses ?? []).map((c) => <RowCard key={`e-${c.label}`}><Text style={{ color: theme.danger }}>E · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
             {(cats?.incomes ?? []).map((c) => <RowCard key={`i-${c.label}`}><Text style={{ color: theme.success }}>I · {localizeCategoryName(c.label)} — <Text style={{ fontWeight: '800' }}>{fmt(c.total)}</Text></Text></RowCard>)}
@@ -249,43 +262,43 @@ export function AnalyticsScreen() {
         )}
         {tab === 'pl' && (
           <View>
-            <SectionTitle title={`Profit & loss · ${pl?.period_label ?? summary.period_label}`} />
+            <SectionTitle title={`${t('profit_per_farm')} · ${pl?.period_label ?? summary.period_label}`} />
             <Card>
-              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By month</Text>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>{t('sec_by_month')}</Text>
               {(pl?.monthly ?? summary.monthly).map((m: any) => (
                 <Row key={`${m.year}-${m.month}`} label={localizeMonthLabel(m.label)} value={`${fmt(m.income)} − ${fmt(m.expense)} = ${fmt(m.balance)}`} tone={m.balance < 0 ? 'red' : 'green'} />
               ))}
             </Card>
             <View style={{ height: 10 }} />
             <Card>
-              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By farm</Text>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>{t('sec_by_farm')}</Text>
               {(pl?.farms ?? []).map((r) => (
-                <Row key={r.farm} label={`${localizeFarmName(r.farm)}`} value={`in ${fmt(r.income)} · out ${fmt(r.expense)} · net ${fmt(r.net)}`} />
+                <Row key={r.farm} label={`${localizeFarmName(r.farm)}`} value={`${t('in_short')} ${fmt(r.income)} · ${t('out_short')} ${fmt(r.expense)} · ${t('row_net')} ${fmt(r.net)}`} />
               ))}
-              {(pl?.farms ?? []).length === 0 && <Text style={{ color: theme.muted }}>No farm rows for these filters.</Text>}
+              {(pl?.farms ?? []).length === 0 && <Text style={{ color: theme.muted }}>{t('cash_no_farm_rows')}</Text>}
             </Card>
             <View style={{ height: 10 }} />
             <Card>
-              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>By category</Text>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>{t('sec_by_category')}</Text>
               {(pl?.income_categories ?? []).map((c) => (
-                <Text key={`pi-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>Income · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
+                <Text key={`pi-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>{t('incomes')} · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
               ))}
               {(pl?.expense_categories ?? []).map((c) => (
-                <Text key={`pe-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>Expense · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
+                <Text key={`pe-${c.label}`} style={{ paddingVertical: 3, color: theme.inkSoft }}>{t('expenses')} · {localizeCategoryName(c.label)} — {fmt(c.total)}</Text>
               ))}
-              <Row label="Net" value={fmt(pl?.net ?? summary.balance)} bold />
+              <Row label={t('row_net')} value={fmt(pl?.net ?? summary.balance)} bold />
             </Card>
           </View>
         )}
         {tab === 'cf' && (
           <View>
             <Card>
-              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Cash flow (running balance)</Text>
+              <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>{t('row_cash_total')}</Text>
               {(cf?.rows ?? []).map((r) => (
-                <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`net ${fmt(r.balance)} · running ${fmt(r.running)}`} tone={r.running < 0 ? 'red' : 'green'} />
+                <Row key={`${r.year}-${r.month}`} label={localizeMonthLabel(r.label)} value={`${t('row_net')} ${fmt(r.balance)} · ${t('running_bal')} ${fmt(r.running)}`} tone={r.running < 0 ? 'red' : 'green'} />
               ))}
-              {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>No cash movement for these filters.</Text>}
-              <Row label={`Total ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
+              {(cf?.rows ?? []).length === 0 && <Text style={{ color: theme.muted }}>{t('empty_no_cash')}</Text>}
+              <Row label={`${t('total')} ${cf?.period_label ?? ''}`} value={fmt(cf?.net ?? summary.balance)} bold />
             </Card>
             <View style={{ height: 10 }} />
             <CumulativeBars labels={(cf?.labels ?? []).map(localizeMonthLabel)} totals={cf?.cumulative ?? []} />
@@ -293,13 +306,13 @@ export function AnalyticsScreen() {
         )}
         {tab === 'tax' && (
           <Card>
-            <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>Tax-flagged items</Text>
-            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 6 }}>Control this with the “Tax” checkbox on each income/expense. Guidance only.</Text>
+            <Text style={{ fontWeight: '800', color: theme.ink, marginBottom: 8 }}>{t('analytics_tax_hint')}</Text>
+            <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 6 }}>{t('sec_taxable_hint')}</Text>
             {(tax?.incomes ?? []).map((i: any) => <Text key={`i-${i.id}`} style={{ paddingVertical: 3, color: theme.success }}>+{fmt(i.amount)} · {i.title} · {i.date}</Text>)}
             {(tax?.expenses ?? []).map((e: any) => <Text key={`e-${e.id}`} style={{ paddingVertical: 3, color: theme.danger }}>−{fmt(e.amount)} · {e.title} · {e.date}</Text>)}
-            <Row label="Taxable income" value={fmt(tax?.income_total ?? 0)} tone="green" />
-            <Row label="Deductible expenses" value={fmt(tax?.expense_total ?? 0)} tone="red" />
-            <Row label="Taxable net" value={fmt(tax?.net ?? 0)} bold tone={(tax?.net ?? 0) < 0 ? 'red' : 'green'} />
+            <Row label={t('row_taxable_income')} value={fmt(tax?.income_total ?? 0)} tone="green" />
+            <Row label={t('row_deductible')} value={fmt(tax?.expense_total ?? 0)} tone="red" />
+            <Row label={t('row_taxable_net_short')} value={fmt(tax?.net ?? 0)} bold tone={(tax?.net ?? 0) < 0 ? 'red' : 'green'} />
           </Card>
         )}
         {tab === 'obligations' && (
@@ -344,7 +357,7 @@ export function AnalyticsScreen() {
           </View>
         )}
         <View style={{ height: 12 }} />
-        <AppButton title="Export current view (CSV)" icon="share-outline" variant="secondary" onPress={exportCurrent} />
+        <AppButton title={t('btn_export_current')} icon="share-outline" variant="secondary" onPress={exportCurrent} />
       </Screen>
       <FloatingTabBar />
     </View>

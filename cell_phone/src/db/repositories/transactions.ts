@@ -173,15 +173,16 @@ function assertSplitBasis(basis: SplitBasis | undefined, treeTypeId: number | nu
 
 export async function createExpense(input: TxnInput): Promise<number> {
   assertTxnCommon(input);
-  assertSplitBasis(input.split_basis, input.split_tree_type_id);
-  const basis = input.split_basis ?? 'trees';
+  // Farm-bound expenses always split by trees (server ExpenseForm resets basis without error).
+  const basis = input.farm_id ? 'trees' : (input.split_basis ?? 'trees');
+  assertSplitBasis(basis, input.farm_id ? null : input.split_tree_type_id);
   const db = getDb();
   const now = nowISO();
   if (input.farm_id) {
     const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [input.farm_id]);
     if (!farm || farm.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected farm must belong to this workspace.');
   } else if (basis === 'tree_type') {
-    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id]);
+    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id ?? null]);
     if (!tt || tt.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected tree/crop must belong to this workspace.');
   }
   const res = await db.runAsync(
@@ -194,14 +195,15 @@ export async function createExpense(input: TxnInput): Promise<number> {
 
 export async function updateExpense(id: number, input: TxnInput): Promise<void> {
   assertTxnCommon(input);
-  assertSplitBasis(input.split_basis, input.split_tree_type_id);
-  const basis = input.split_basis ?? 'trees';
+  // Farm-bound expenses always split by trees (server ExpenseForm resets basis without error).
+  const basis = input.farm_id ? 'trees' : (input.split_basis ?? 'trees');
+  assertSplitBasis(basis, input.farm_id ? null : input.split_tree_type_id);
   const db = getDb();
   if (input.farm_id) {
     const farm = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM farms WHERE id = ?', [input.farm_id]);
     if (!farm || farm.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected farm must belong to this workspace.');
   } else if (basis === 'tree_type') {
-    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id]);
+    const tt = await db.getFirstAsync<{ profile_id: number }>('SELECT profile_id FROM tree_types WHERE id = ?', [input.split_tree_type_id ?? null]);
     if (!tt || tt.profile_id !== SINGLE_PROFILE_ID) throw new Error('Selected tree/crop must belong to this workspace.');
   }
   await db.runAsync(
@@ -317,7 +319,8 @@ export async function computeAutoSplit(
 ): Promise<Array<{ farm_id: number; amount: number }>> {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter an amount greater than zero.');
   const { weights, total } = await splitWeights(basis, treeTypeId);
-  if (weights.size === 0) throw new Error('Add a farm first to split across farms.');
+  // No farms: nothing to allocate (server auto_income_allocations returns []).
+  if (weights.size === 0) return [];
   if (basis === 'tree_type' && total <= 0) throw new Error('No farm has this tree/crop.');
   const cents = Math.round(amount * 100);
   const ids = [...weights.keys()];
@@ -329,7 +332,8 @@ export async function computeAutoSplit(
   }
   const assigned = [...shares.values()].reduce((a, b) => a + b, 0);
   let remainder = cents - assigned;
-  const largest = [...ids].sort((a, b) => (weights.get(b) ?? 0) - (weights.get(a) ?? 0) || a - b)[0];
+  // Remainder goes to the largest farm; ties break to the largest id (server split_amount_by_trees).
+  const largest = [...ids].sort((a, b) => (weights.get(b) ?? 0) - (weights.get(a) ?? 0) || b - a)[0];
   if (remainder > 0) shares.set(largest, (shares.get(largest) ?? 0) + remainder);
   return ids
     .map((farm_id) => ({ farm_id, amount: (shares.get(farm_id) ?? 0) / 100 }))
@@ -338,8 +342,8 @@ export async function computeAutoSplit(
 
 export async function deleteExpense(id: number): Promise<void> {
   const db = getDb();
-  const ref = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM farm_tasks WHERE expense_id = ?', [id]);
-  if ((ref?.n ?? 0) > 0) throw new Error('Cannot delete: linked by farm tasks. Unlink it first.');
+  // Mirror Django SET_NULL: task links are cleared, the delete succeeds (server record_delete).
+  await db.runAsync('UPDATE farm_tasks SET expense_id = NULL WHERE expense_id = ?', [id]);
   await db.runAsync('DELETE FROM expenses WHERE id = ? AND profile_id = ?', [id, SINGLE_PROFILE_ID]);
 }
 

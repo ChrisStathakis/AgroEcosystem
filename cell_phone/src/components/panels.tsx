@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { fmt, fmtCompact, useColors } from './theme';
 import { Card } from './ui';
+import { t, useLang } from '../lib/i18n';
 
 function useCountUp(target: number, duration = 700) {
   const v = useSharedValue(0);
@@ -69,12 +70,13 @@ function useStatStyles() {
 export function Stats({ income, expense, balance }: { income: number; expense: number; balance: number }) {
   const theme = useColors();
   const styles = useStatStyles();
+  useLang();
   return (
     <View style={styles.row}>
-      <StatCard label="Income" value={income} icon="trending-up" tint={theme.success} bg={theme.successSoft} delay={0} />
-      <StatCard label="Expenses" value={expense} icon="trending-down" tint={theme.danger} bg={theme.dangerSoft} delay={90} />
+      <StatCard label={t('stat_income')} value={income} icon="trending-up" tint={theme.success} bg={theme.successSoft} delay={0} />
+      <StatCard label={t('stat_expenses')} value={expense} icon="trending-down" tint={theme.danger} bg={theme.dangerSoft} delay={90} />
       <StatCard
-        label="Balance"
+        label={t('stat_balance')}
         value={balance}
         icon="wallet"
         tint={balance < 0 ? theme.danger : theme.success}
@@ -105,11 +107,12 @@ function useHeroStyles() {
 
 export function HeroBalance({ balance, income, expense }: { balance: number; income: number; expense: number }) {
   const heroStyles = useHeroStyles();
+  useLang();
   return (
     <View style={heroStyles.wrap}>
       <LinearGradient colors={['#1E4D3A', '#2E6B4F']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={heroStyles.gradient}>
         <View style={heroStyles.topRow}>
-          <Text style={heroStyles.eyebrow}>NET BALANCE · YEAR</Text>
+          <Text style={heroStyles.eyebrow}>{t('hero_net_balance')}</Text>
           <Ionicons name="leaf" size={20} color="#A8C686" />
         </View>
         <Text style={heroStyles.balance}>{fmt(balance)}</Text>
@@ -191,10 +194,11 @@ export function CategoryBars({ title, items, tone }: { title: string; items: Arr
 
 export function FarmProfitBars({ rows }: { rows: Array<{ farm: string; net: number }> }) {
   const chartStyles = useChartStyles();
+  useLang();
   if (rows.length === 0) return null;
   return (
     <Card>
-      <Text style={chartStyles.title}>Net per farm</Text>
+      <Text style={chartStyles.title}>{t('chart_net_per_farm')}</Text>
       <View style={{ height: 8 }} />
       <MiniBars items={rows.map((r) => ({ label: r.farm, value: r.net, tone: r.net < 0 ? 'red' as const : 'green' as const }))} />
     </Card>
@@ -204,12 +208,13 @@ export function FarmProfitBars({ rows }: { rows: Array<{ farm: string; net: numb
 export function CumulativeBars({ labels, totals }: { labels: string[]; totals: number[] }) {
   const theme = useColors();
   const chartStyles = useChartStyles();
+  useLang();
   if (labels.length === 0) return null;
   const min = Math.min(0, ...totals);
   const max = Math.max(1, ...totals.map((x) => x - min));
   return (
     <Card>
-      <Text style={chartStyles.title}>Cumulative balance</Text>
+      <Text style={chartStyles.title}>{t('chart_cumulative')}</Text>
       <View style={{ height: 8 }} />
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 90 }}>
         {totals.map((v, i) => (
@@ -233,19 +238,20 @@ export function CumulativeBars({ labels, totals }: { labels: string[]; totals: n
 export function MonthlyChart({ monthly }: { monthly: { label: string; income: number; expense: number }[] }) {
   const theme = useColors();
   const chartStyles = useChartStyles();
+  useLang();
   const max = Math.max(1, ...monthly.map((m) => Math.max(m.income, m.expense)));
   return (
     <Card>
       <View style={chartStyles.head}>
-        <Text style={chartStyles.title}>Cash rhythm</Text>
+        <Text style={chartStyles.title}>{t('chart_cash_rhythm')}</Text>
         <View style={chartStyles.legend}>
           <View style={chartStyles.dotRow}>
             <View style={[chartStyles.dot, { backgroundColor: theme.success }]} />
-            <Text style={chartStyles.legendText}>In</Text>
+            <Text style={chartStyles.legendText}>{t('chart_in')}</Text>
           </View>
           <View style={chartStyles.dotRow}>
             <View style={[chartStyles.dot, { backgroundColor: theme.danger }]} />
-            <Text style={chartStyles.legendText}>Out</Text>
+            <Text style={chartStyles.legendText}>{t('chart_out')}</Text>
           </View>
         </View>
       </View>

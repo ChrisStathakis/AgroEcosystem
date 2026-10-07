@@ -11,6 +11,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing, useColors } from './theme';
+import { t, useLang } from '../lib/i18n';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -198,13 +199,14 @@ function useInputStyles() {
 export function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const theme = useColors();
   const searchStyles = useSearchStyles();
+  useLang();
   return (
     <View style={searchStyles.box}>
       <Ionicons name="search" size={17} color={theme.muted} />
       <TextInput
         value={value}
         onChangeText={onChange}
-        placeholder={placeholder ?? 'Search…'}
+        placeholder={placeholder ?? t('ph_search')}
         placeholderTextColor={theme.faint}
         style={searchStyles.field}
       />
@@ -456,7 +458,7 @@ export interface SelectOption {
 
 export function AppSelect({
   label,
-  placeholder = 'Select…',
+  placeholder = '',
   value,
   options,
   onChange,
@@ -472,7 +474,9 @@ export function AppSelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const theme = useColors();
+  useLang();
   const inputStyles = useInputStyles();
+  const ph = placeholder || t('form_select_one');
   const selected = useMemo(() => options.find((o) => String(o.id) === String(value ?? '')), [options, value]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -485,7 +489,7 @@ export function AppSelect({
       <Pressable onPress={() => { setQ(''); setOpen(true); }} style={inputStyles.box}>
         <Ionicons name="chevron-down" size={17} color={theme.muted} />
         <Text style={[inputStyles.field, !selected && { color: theme.faint }]} numberOfLines={1}>
-          {selected ? selected.label : placeholder}
+          {selected ? selected.label : ph}
         </Text>
         {selected && allowClear ? (
           <Pressable onPress={() => onChange(null)}>
@@ -496,14 +500,14 @@ export function AppSelect({
       <Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
         <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 48, paddingHorizontal: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <Text style={{ fontSize: 17, fontWeight: '800', color: theme.ink }}>{label ?? placeholder}</Text>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: theme.ink }}>{label ?? ph}</Text>
             <Pressable onPress={() => setOpen(false)} style={{ padding: 8 }}>
               <Ionicons name="close" size={22} color={theme.ink} />
             </Pressable>
           </View>
-          <SearchBar value={q} onChange={setQ} placeholder="Search…" />
+          <SearchBar value={q} onChange={setQ} placeholder={t('ph_search')} />
           <FlatList
-            data={allowClear ? [{ id: '__clear__', label: '— Clear selection —' } as SelectOption, ...filtered] : filtered}
+            data={allowClear ? [{ id: '__clear__', label: `— ${t('clear')} —` } as SelectOption, ...filtered] : filtered}
             keyExtractor={(item) => String(item.id)}
             renderItem={({ item }) => (
               <Pressable
@@ -518,7 +522,7 @@ export function AppSelect({
                 {item.sub ? <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{item.sub}</Text> : null}
               </Pressable>
             )}
-            ListEmptyComponent={<EmptyState icon="search-outline" title="No matches" hint="Try a different search." />}
+            ListEmptyComponent={<EmptyState icon="search-outline" title={t('empty_no_matches')} hint={t('empty_no_matches_hint')} />}
           />
         </View>
       </Modal>
@@ -550,6 +554,68 @@ export function FAB({ icon = 'add', onPress, label }: { icon?: keyof typeof Ioni
     </AnimatedPressable>
   );
 }
+// ---------- Filter dropdown (collapsible, collapsed by default) ----------
+export function FilterDropdown({
+  children,
+  activeCount = 0,
+  onClear,
+  title = '',
+  defaultOpen = false,
+}: {
+  children: React.ReactNode;
+  activeCount?: number;
+  onClear?: () => void;
+  title?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const theme = useColors();
+  useLang();
+  const shown = open;
+  const header = title || t('filters');
+  return (
+    <View
+      style={{
+        backgroundColor: theme.card,
+        borderRadius: theme.radius,
+        borderWidth: 1,
+        borderColor: theme.border,
+        marginBottom: 10,
+        overflow: 'hidden',
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          setOpen((v) => !v);
+        }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 13 }}
+      >
+        <Ionicons name="filter" size={17} color={theme.green} />
+        <Text style={{ fontSize: 14.5, fontWeight: '800', color: theme.ink, flex: 1 }}>{header}</Text>
+        {activeCount > 0 ? (
+          <View style={{ minWidth: 22, height: 22, borderRadius: 11, backgroundColor: theme.pine, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{activeCount}</Text>
+          </View>
+        ) : null}
+        {activeCount > 0 && onClear ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => onClear()}
+            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            hitSlop={8}
+          >
+            <Text style={{ fontSize: 12.5, fontWeight: '700', color: theme.muted }}>{t('clear')}</Text>
+          </Pressable>
+        ) : null}
+        <Ionicons name={shown ? 'chevron-up' : 'chevron-down'} size={17} color={theme.muted} />
+      </Pressable>
+      {shown ? <View style={{ paddingHorizontal: 14, paddingBottom: 14, paddingTop: 2 }}>{children}</View> : null}
+    </View>
+  );
+}
+
 function useFabStyles() {
   const theme = useColors();
   return useMemo(

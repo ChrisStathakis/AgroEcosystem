@@ -14,6 +14,7 @@ import {
 } from '../types';
 import type { SQLiteBindValue } from 'expo-sqlite';
 import { expenseAmountExpr, farmTreeWeights, shareRatio } from './split';
+import { t } from '../../lib/i18n';
 
 // Port of server/analytics/services.py for offline SQLite.
 // Supports year OR custom start/end plus farm/category/vendor/customer/
@@ -258,9 +259,9 @@ export async function financialSummary(yearOrFilters?: number | AnalyticsFilters
     );
     return row?.total ?? 0;
   };
-  const income_total = await sum('incomes', '', iw);
-  const taxable_income = await sum('incomes', 'AND include_in_tax = 1', iw);
-  let expense_total = await sum('expenses', '', ew);
+  const income_total = await sum('incomes', 'i.amount', '', iw);
+  const taxable_income = await sum('incomes', 'i.amount', 'AND include_in_tax = 1', iw);
+  let expense_total = await sum('expenses', expExpr, '', ew);
   let deductible_expenses: number;
   if (filters.farm_id) {
     // Direct rows plus each shared group split by its own basis.
@@ -269,7 +270,7 @@ export async function financialSummary(yearOrFilters?: number | AnalyticsFilters
     deductible_expenses = (await directFarmTotal(filters, p, filters.farm_id, true))
       + (await sharedSplitForFarm({ ...filters, tax: 'all' }, p, filters.farm_id, true));
   } else {
-    deductible_expenses = await sum('expenses', 'AND include_in_tax = 1', ew);
+    deductible_expenses = await sum('expenses', expExpr, 'AND include_in_tax = 1', ew);
   }
 
   const byMonth = async (income: boolean) => {
@@ -453,16 +454,26 @@ export async function farmProfit(yearOrFilters?: number | AnalyticsFilters): Pro
   if (!filters.farm_id) {
     const iw = incomeWhere(filters, p);
     const total = (await db.getFirstAsync<{ total: number }>(`SELECT COALESCE(SUM(i.amount),0) AS total FROM incomes i WHERE ${iw.sql}`, iw.params))?.total ?? 0;
+    // Allocated slice honors the same income dimensions as the total
+    // (server: income__in=filter_incomes).
     const allocated =
       (
         await db.getFirstAsync<{ total: number }>(
-          `SELECT COALESCE(SUM(ia.amount),0) AS total FROM income_farm_allocations ia JOIN incomes i ON i.id = ia.income_id WHERE ia.profile_id = ? AND i.date >= ? AND i.date <= ?`,
-          [SINGLE_PROFILE_ID, p.start, p.end],
+          `SELECT COALESCE(SUM(ia.amount),0) AS total FROM income_farm_allocations ia JOIN incomes i ON i.id = ia.income_id WHERE ia.profile_id = ? AND ${iw.sql}`,
+          [SINGLE_PROFILE_ID, ...iw.params.slice(1)],
         )
       )?.total ?? 0;
     // Server adds the row when remainder is truthy (non-zero, either sign).
     const unallocated = total - allocated;
     if (Math.abs(unallocated) > 0.000001) rows.push({ farm: 'Unallocated', income: unallocated, expense: 0, net: unallocated });
+    const farmCount = (await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM farms WHERE profile_id = ?', [SINGLE_PROFILE_ID]))?.n ?? 0;
+    if (farmCount === 0) {
+      // No farms at all: shared expenses still belong to an Unallocated row (server farm_profit).
+      const sharedGroups = await sharedExpenseGroups(filters, p);
+      const sharedTotal = sharedGroups.reduce((a, g) => a + (g.total ?? 0), 0);
+      if (sharedTotal) rows.push({ farm: 'Unallocated', income: 0, expense: sharedTotal, net: -sharedTotal });
+    }
   }
   return rows.sort((a, b) => b.net - a.net);
 }
@@ -548,7 +559,7 @@ export async function taxReport(filters: AnalyticsFilters = {}) {
      WHERE ${ew.sql} ORDER BY e.date, e.id`,
     ew.params,
   );
-  const summary = await financialSummary(filters);
+  const summary = await financialSummary(taxed);
   return {
     period_label: p.label,
     start: p.start,
@@ -686,14 +697,14 @@ export async function availableYears(): Promise<number[]> {
 
 export function describeFilters(f: AnalyticsFilters, periodLabel?: string, names?: Record<string, string>): string {
   const parts: string[] = [];
-  parts.push(`Period: ${periodLabel ?? (f.year ? String(f.year) : [f.start, f.end].filter(Boolean).join(' – ') || 'custom')}`);
-  if (f.farm_id) parts.push(`Farm: ${names?.[`farm:${f.farm_id}`] ?? `#${f.farm_id}`}`);
-  if (f.expense_category_id) parts.push(`Expense category: ${names?.[`expense_category:${f.expense_category_id}`] ?? `#${f.expense_category_id}`}`);
-  if (f.income_category_id) parts.push(`Income category: ${names?.[`income_category:${f.income_category_id}`] ?? `#${f.income_category_id}`}`);
-  if (f.vendor_id) parts.push(`Vendor: ${names?.[`vendor:${f.vendor_id}`] ?? `#${f.vendor_id}`}`);
-  if (f.customer_id) parts.push(`Customer: ${names?.[`customer:${f.customer_id}`] ?? `#${f.customer_id}`}`);
-  if (f.document_type) parts.push(`Document: ${f.document_type === 'invoice' ? 'Invoice' : 'Receipt'}`);
-  if (f.tax && f.tax !== 'all') parts.push(`Tax: ${f.tax === 'taxed' ? 'Taxed only' : 'Untaxed only'}`);
+  parts.push(`${t('period')}: ${periodLabel ?? (f.year ? String(f.year) : [f.start, f.end].filter(Boolean).join(' – ') || 'custom')}`);
+  if (f.farm_id) parts.push(`${t('farm')}: ${names?.[`farm:${f.farm_id}`] ?? `#${f.farm_id}`}`);
+  if (f.expense_category_id) parts.push(`${t('expense_categories')}: ${names?.[`expense_category:${f.expense_category_id}`] ?? `#${f.expense_category_id}`}`);
+  if (f.income_category_id) parts.push(`${t('income_categories')}: ${names?.[`income_category:${f.income_category_id}`] ?? `#${f.income_category_id}`}`);
+  if (f.vendor_id) parts.push(`${t('vendor')}: ${names?.[`vendor:${f.vendor_id}`] ?? `#${f.vendor_id}`}`);
+  if (f.customer_id) parts.push(`${t('customer')}: ${names?.[`customer:${f.customer_id}`] ?? `#${f.customer_id}`}`);
+  if (f.document_type) parts.push(`${t('form_document')}: ${f.document_type === 'invoice' ? t('invoice') : t('receipt')}`);
+  if (f.tax && f.tax !== 'all') parts.push(`${t('form_tax')}: ${f.tax === 'taxed' ? t('taxed_only') : t('untaxed_only')}`);
   return parts.join(' · ');
 }
 

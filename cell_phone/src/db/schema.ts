@@ -124,7 +124,6 @@ CREATE TABLE IF NOT EXISTS expenses (
   include_in_tax INTEGER NOT NULL DEFAULT 0,
   is_paid INTEGER NOT NULL DEFAULT 1,
   is_archived INTEGER NOT NULL DEFAULT 0,
-  is_paid INTEGER NOT NULL DEFAULT 1,
   split_basis TEXT NOT NULL DEFAULT 'trees' CHECK (split_basis IN ('trees','tree_type','area','equal')),
   split_tree_type_id INTEGER REFERENCES tree_types(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL,

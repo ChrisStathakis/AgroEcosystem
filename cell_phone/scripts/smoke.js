@@ -46,7 +46,7 @@ const checks = [
   ['src/screens/TasksScreen.tsx', ['Select', 'listTaskExpenseOptions']],
   ['src/screens/TransactionsScreens.tsx', ['Select', 'AllocationDraft']],
   ['src/screens/AnalyticsScreen.tsx', ['Select', 'listFarms', 'obligationsReport', 'CumulativeBars']],
-  ['src/screens/SettingsScreen.tsx', ['getDocumentAsync', 'pickBackupFile', 'Preview current data', 'setThemePreference']],
+  ['src/screens/SettingsScreen.tsx', ['getDocumentAsync', 'pickBackupFile', 'btn_preview_data', 'setThemePreference']],
   ['src/lib/i18n.ts', ['loadLang', 'persistLang', 'agro-lang.json']],
   ['src/components/theme.ts', ['darkColors', 'agro-theme.json', 'useColors']],
   ['src/lib/csv.ts', ['is_paid', 'obligationsToCSV']],
