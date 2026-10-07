@@ -39,14 +39,14 @@ def make_workspace(username="owner"):
 class FrontendAuthenticationTests(TestCase):
     def test_home_redirects_anonymous_users_to_login(self):
         response = self.client.get("/el/")
-        self.assertRedirects(response, "/el/accounts/login/?next=/el/")
+        self.assertRedirects(response, "/accounts/login/?next=/el/")
 
     def test_authenticated_user_can_open_home_and_logout(self):
         user = get_user_model().objects.create_user("owner", password="pass12345")
         self.client.force_login(user)
         self.assertEqual(self.client.get("/el/").status_code, 200)
         response = self.client.post("/el/accounts/logout/")
-        self.assertRedirects(response, "/el/accounts/login/")
+        self.assertRedirects(response, "/accounts/login/")
 
 
 class SignupTests(TestCase):
@@ -57,7 +57,7 @@ class SignupTests(TestCase):
         response = self.client.post("/el/accounts/signup/", {
             "username": "newbie", "password1": "StrongPass123", "password2": "StrongPass123",
         })
-        self.assertRedirects(response, "/el/")
+        self.assertRedirects(response, "/")
         user = get_user_model().objects.get(username="newbie")
         self.assertTrue(hasattr(user, "profile"))
         self.assertEqual(self.client.get("/el/").status_code, 200)
@@ -65,7 +65,7 @@ class SignupTests(TestCase):
     def test_signup_redirects_authenticated_users_home(self):
         user = get_user_model().objects.create_user("owner", password="pass12345")
         self.client.force_login(user)
-        self.assertRedirects(self.client.get("/el/accounts/signup/"), "/el/")
+        self.assertRedirects(self.client.get("/el/accounts/signup/"), "/")
 
 
 class TaxSummaryTests(TestCase):
@@ -102,7 +102,7 @@ class RecordExportTests(TestCase):
     def test_expense_export_requires_login(self):
         response = self.client.get("/el/expenses/export/")
         self.assertEqual(response.status_code, 302)
-        self.assertIn("/el/accounts/login/", response["Location"])
+        self.assertIn("/accounts/login/", response["Location"])
 
     def test_expense_export_returns_filtered_csv(self):
         user, profile, farm, expense_category, income_category = make_workspace()
@@ -159,6 +159,13 @@ class GreekLocalizationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Καλώς ήρθατε πίσω")
         self.assertContains(response, "Έξοδα")
+
+    def test_root_serves_greek_without_prefix(self):
+        user = get_user_model().objects.create_user("owner", password="pass12345")
+        self.client.force_login(user)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Καλώς ήρθατε πίσω")
 
     def test_english_templates_still_available(self):
         user = get_user_model().objects.create_user("owner", password="pass12345")
@@ -355,7 +362,7 @@ class WorkspaceBackupTests(TestCase):
         self.assertEqual(Expense.objects.filter(profile=owner_profile).count(), 1)
         # Correct confirmation wipes only the owner's workspace.
         response = self.client.post("/el/workspace/destroy/", {"confirmation": "owner"})
-        self.assertRedirects(response, "/el/")
+        self.assertRedirects(response, "/")
         self.assertEqual(Expense.objects.filter(profile=owner_profile).count(), 0)
         self.assertEqual(Farm.objects.filter(profile=owner_profile).count(), 0)
         self.assertEqual(Expense.objects.filter(profile=other_profile).count(), 1)
@@ -375,7 +382,7 @@ class WorkspaceBackupTests(TestCase):
         self.assertEqual(preview.status_code, 200)
         self.assertContains(preview, "Επιβεβαίωση επαναφοράς")
         done = self.client.post("/el/workspace/restore/", {"confirm": "1", "mode": "replace"})
-        self.assertRedirects(done, "/el/")
+        self.assertRedirects(done, "/")
         self.assertEqual(Expense.objects.filter(profile=profile).count(), 1)
 
     def test_restore_view_rejects_invalid_file(self):
@@ -596,7 +603,7 @@ class QuickCreateTests(TestCase):
     def test_login_required(self):
         response = self.client.get("/el/farms/quick-add/")
         self.assertEqual(response.status_code, 302)
-        self.assertIn("/el/accounts/login/", response["Location"])
+        self.assertIn("/accounts/login/", response["Location"])
 
     def test_get_returns_form_html_and_title(self):
         user = get_user_model().objects.create_user("owner", password="pass12345")
@@ -685,7 +692,7 @@ class ArchivedTransactionTests(TestCase):
         self.client.force_login(user)
         response = self.client.post("/el/expenses/new/",
                                     {**self._expense_data(farm, expense_category), "is_archived": "on"})
-        self.assertRedirects(response, "/el/expenses/")
+        self.assertRedirects(response, "/expenses/")
         expense = Expense.objects.get(profile=profile, title="Seeds")
         self.assertTrue(expense.is_archived)
 
@@ -699,7 +706,7 @@ class ArchivedTransactionTests(TestCase):
                                      "document_type": "invoice", "is_archived": "on",
                                      f"{prefix}-TOTAL_FORMS": "3", f"{prefix}-INITIAL_FORMS": "0",
                                      f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"})
-        self.assertRedirects(response, "/el/incomes/")
+        self.assertRedirects(response, "/incomes/")
         self.assertTrue(Income.objects.get(profile=profile, title="Sale").is_archived)
 
     def test_forms_show_greek_archived_label(self):
@@ -841,7 +848,7 @@ class SplitBasisTests(TestCase):
             "document_type": "invoice", "allocation_basis": "area",
             f"{prefix}-TOTAL_FORMS": "3", f"{prefix}-INITIAL_FORMS": "0",
             f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"})
-        self.assertRedirects(response, "/el/incomes/")
+        self.assertRedirects(response, "/incomes/")
         income = Income.objects.get(profile=profile, title="Auto sale")
         shares = {a.farm.title: a.amount for a in income.allocations.all()}
         self.assertEqual(shares, {"North": Decimal("20.00"), "South": Decimal("60.00")})

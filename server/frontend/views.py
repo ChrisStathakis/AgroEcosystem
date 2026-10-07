@@ -20,10 +20,12 @@ from django.views.decorators.http import require_http_methods
 from analytics.services import (
     cash_flow_report,
     charts_payload,
+    compare_years,
     describe_filters,
     farm_profit,
     financial_summary,
     obligations_report,
+    period_comparison,
     profit_loss_report,
     tax_report,
 )
@@ -287,9 +289,22 @@ def analytics(request):
         farms = {**farms, "farms": [
             {**row, "farm": "Χωρίς κατανομή" if row["farm"] == "Unallocated" else row["farm"]}
             for row in farms["farms"]]}
+    comparison = compare_years(profile, filters=filters)
     return render(request, el_template(request, "frontend/analytics.html"), context_for(
         request, "analytics", summary=summary, export_report="overview",
-        chart_data=payload, farm_rows=farms["farms"],
+        chart_data=payload, farm_rows=farms["farms"], comparison=comparison,
+        filter_form=filter_form, query_params=_analytics_query_params(request),
+        filter_description=describe_filters(profile, filters or {}),
+        print_mode=request.GET.get("print") == "1"))
+
+
+@login_required
+def analytics_periods(request):
+    profile = workspace(request)
+    filter_form, filters = parse_analytics_filters(request, profile)
+    data = period_comparison(profile, filters=filters)
+    return render(request, el_template(request, "frontend/analytics_periods.html"), context_for(
+        request, "analytics-periods", report=data, export_report="periods",
         filter_form=filter_form, query_params=_analytics_query_params(request),
         filter_description=describe_filters(profile, filters or {}),
         print_mode=request.GET.get("print") == "1"))
@@ -395,7 +410,8 @@ def analytics_obligations(request):
 def analytics_export(request, report):
     """CSV export for the overview and the reports, honoring filters."""
     builders = {"overview": financial_summary, "pl": profit_loss_report,
-                "cf": cash_flow_report, "tax": tax_report, "obligations": obligations_report}
+                "cf": cash_flow_report, "tax": tax_report, "obligations": obligations_report,
+                "periods": period_comparison}
     if report not in builders:
         raise Http404
     profile = workspace(request)
@@ -405,6 +421,16 @@ def analytics_export(request, report):
     period = str(data.get("period_label", data.get("year", ""))).replace(" – ", "_").replace(" ", "")
     response["Content-Disposition"] = f'attachment; filename="analytics-{report}-{period or "all"}.csv"'
     writer = csv.writer(response)
+    if report == "periods":
+        writer.writerow(["period", "start", "end", "income_total", "income_taxed", "income_untaxed",
+                         "expense_total", "expense_taxed", "expense_untaxed", "net", "taxable_net"])
+        for row in data["rows"]:
+            writer.writerow([row["label"], row["start"].isoformat(), row["end"].isoformat(),
+                             f"{row['income_total']:.2f}", f"{row['income_taxed']:.2f}",
+                             f"{row['income_untaxed']:.2f}", f"{row['expense_total']:.2f}",
+                             f"{row['expense_taxed']:.2f}", f"{row['expense_untaxed']:.2f}",
+                             f"{row['net']:.2f}", f"{row['taxable_net']:.2f}"])
+        return response
     if report == "obligations":
         writer.writerow(["title", "date", "farm", "category", "vendor", "amount", "overdue"])
         for item in data["items"]:
@@ -712,7 +738,8 @@ def record_export(request, resource):
                   "include_in_tax", "is_paid", "amount", "description"]
     if resource == "incomes":
         header = ["title", "date", "farms", "unallocated", "category", contact_attr,
-                  "document_type", "include_in_tax", "amount", "description"]
+                  "document_type", "include_in_tax", "amount", "quantity", "unit",
+                  "unit_price", "description"]
     writer.writerow(header)
     if resource == "incomes":
         records = list(records)
@@ -722,7 +749,11 @@ def record_export(request, resource):
         if resource == "incomes":
             writer.writerow([item.title, item.date.isoformat(), item.farm_summary, f"{item.unallocated_amount:.2f}",
                              str(item.category), str(contact) if contact else "", item.document_type,
-                             "yes" if item.include_in_tax else "no", f"{item.amount:.2f}", item.description])
+                             "yes" if item.include_in_tax else "no", f"{item.amount:.2f}",
+                             f"{item.quantity:.2f}" if item.quantity is not None else "",
+                             item.unit or "",
+                             f"{item.unit_price:.2f}" if item.unit_price is not None else "",
+                             item.description])
         else:
             farm_label = str(item.farm) if item.farm_id else "All farms (split)"
             writer.writerow([item.title, item.date.isoformat(), farm_label, str(item.category),
@@ -845,17 +876,111 @@ def record_delete(request, resource, pk):
 @login_required
 @require_http_methods(["GET", "POST"])
 def profile_settings(request):
-    form = forms.ProfileForm(request.POST if request.method == "POST" else None, instance=workspace(request))
-    if request.method == "POST" and form.is_valid():
+    from . import dropbox as dropbox_client
+
+    profile = workspace(request)
+    is_dropbox_post = request.method == "POST" and "save_dropbox" in request.POST
+    form = forms.ProfileForm(
+        request.POST if request.method == "POST" and not is_dropbox_post else None,
+        instance=profile)
+    dropbox_form = forms.DropboxSettingsForm(
+        request.POST if is_dropbox_post else None, instance=profile)
+    if request.method == "POST" and not is_dropbox_post and form.is_valid():
         form.save()
         flash(request, "Your workspace name has been updated.", "Το όνομα του χώρου εργασίας σας ενημερώθηκε.")
         return redirect("profile-settings")
-    return render(request, el_template(request, "frontend/profile.html"), context_for(request, "profile", form=form))
+    if is_dropbox_post and dropbox_form.is_valid():
+        obj = dropbox_form.save(commit=False)
+        # Changing the app credentials invalidates the old OAuth grant.
+        if any(k in dropbox_form.changed_data for k in ("dropbox_app_key", "dropbox_app_secret")):
+            obj.dropbox_refresh_token = ""
+            obj.dropbox_account = ""
+        obj.save(update_fields=["dropbox_app_key", "dropbox_app_secret",
+                                "dropbox_refresh_token", "dropbox_account", "updated_at"])
+        flash(request, "Dropbox settings saved.", "Οι ρυθμίσεις Dropbox αποθηκεύτηκαν.")
+        return redirect("profile-settings")
+    return render(request, el_template(request, "frontend/profile.html"), context_for(
+        request, "profile", form=form, profile=profile, dropbox_form=dropbox_form,
+        dropbox_redirect_uri=_dropbox_redirect_uri(request),
+        dropbox_configured=dropbox_client.is_configured(profile),
+        dropbox_connected=bool(profile.dropbox_refresh_token)))
 
 
 class LocalizedLoginView(LoginView):
     def get_template_names(self):
         return [el_template(self.request, "registration/login.html")]
+
+
+def _dropbox_redirect_uri(request) -> str:
+    return request.build_absolute_uri("/profile/dropbox/callback/")
+
+
+@login_required
+def dropbox_connect(request):
+    from . import dropbox as dropbox_client
+
+    profile = workspace(request)
+    if not dropbox_client.is_configured(profile):
+        messages.error(request, "Βάλτε πρώτα App Key + Secret στα Settings."
+                       if is_greek(request) else "Enter App Key + Secret in Settings first.")
+        return redirect("profile-settings")
+    return redirect(dropbox_client.authorize_url(_dropbox_redirect_uri(request), profile))
+
+
+@login_required
+def dropbox_callback(request):
+    from . import dropbox as dropbox_client
+
+    code = request.GET.get("code", "")
+    error = request.GET.get("error", "")
+    if error or not code:
+        messages.error(request, "Η σύνδεση με το Dropbox ακυρώθηκε."
+                       if is_greek(request) else "Dropbox connection was cancelled.")
+        return redirect("profile-settings")
+    try:
+        profile = workspace(request)
+        tokens = dropbox_client.exchange_code(code, _dropbox_redirect_uri(request), profile)
+        refresh = tokens.get("refresh_token", "")
+        if not refresh:
+            raise dropbox_client.DropboxError("Dropbox did not return a refresh token.")
+        access = tokens.get("access_token", "")
+        profile.dropbox_refresh_token = refresh
+        profile.dropbox_account = dropbox_client.get_account_name(access) if access else ""
+        profile.save(update_fields=["dropbox_refresh_token", "dropbox_account", "updated_at"])
+    except dropbox_client.DropboxError as exc:
+        messages.error(request, exc.el_message if is_greek(request) else exc.en_message)
+        return redirect("profile-settings")
+    flash(request, "Dropbox connected.", "Το Dropbox συνδέθηκε.")
+    return redirect("profile-settings")
+
+
+@login_required
+@require_http_methods(["POST"])
+def dropbox_disconnect(request):
+    profile = workspace(request)
+    profile.dropbox_refresh_token = ""
+    profile.dropbox_account = ""
+    profile.save(update_fields=["dropbox_refresh_token", "dropbox_account", "updated_at"])
+    flash(request, "Dropbox disconnected.", "Το Dropbox αποσυνδέθηκε.")
+    return redirect("profile-settings")
+
+
+@login_required
+@require_http_methods(["POST"])
+def dropbox_upload(request):
+    from . import dropbox as dropbox_client
+
+    profile = workspace(request)
+    try:
+        payload = workspace_backup.build_backup(profile)
+        filename = f"agro-backup-{timezone.localdate().isoformat()}.json"
+        path = dropbox_client.upload_backup(profile, payload, filename)
+    except dropbox_client.DropboxError as exc:
+        messages.error(request, exc.el_message if is_greek(request) else exc.en_message)
+        return redirect("profile-settings")
+    flash(request, f"Backup saved to Dropbox ({path}).",
+          f"Το αντίγραφο αποθηκεύτηκε στο Dropbox ({path}).")
+    return redirect("profile-settings")
 
 
 @login_required

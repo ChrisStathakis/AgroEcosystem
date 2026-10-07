@@ -28,7 +28,7 @@ class IncomeCategoryAdmin(ProfileScopedAdmin):
 
 @admin.register(Income)
 class IncomeAdmin(ProfileScopedAdmin):
-    list_display = ("title", "farm", "category", "customer", "amount", "date", "document_type", "include_in_tax", "is_archived")
+    list_display = ("title", "farm", "category", "customer", "amount", "quantity", "unit", "unit_price", "date", "document_type", "include_in_tax", "is_archived")
     list_filter = ("document_type", "include_in_tax", "is_archived", "category")
     search_fields = ("title", "description", "allocations__farm__title")
     autocomplete_fields = ("category", "customer")

@@ -10,3 +10,10 @@ urlpatterns += i18n_patterns(
     path('admin/', admin.site.urls),
     path('', include('frontend.urls')),
 )
+
+# Greek is the default: also serve the same pages without any prefix,
+# so `/` (desktop app, bookmarks) opens the Greek version directly.
+# `/el/` keeps working, `/en/` serves English.
+urlpatterns += [
+    path('', include('frontend.urls')),
+]

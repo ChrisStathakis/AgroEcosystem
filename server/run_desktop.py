@@ -72,6 +72,7 @@ def main():
     import expenses.models  # noqa: F401
     import farm.models  # noqa: F401
     import frontend.backup  # noqa: F401
+    import frontend.dropbox  # noqa: F401
     import frontend.forms  # noqa: F401
     import frontend.urls  # noqa: F401
     import frontend.views  # noqa: F401

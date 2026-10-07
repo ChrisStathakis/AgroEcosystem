@@ -646,3 +646,127 @@ def describe_filters(profile, filters) -> str:
     if f.get("tax") and f["tax"] != "all":
         parts.append(f"Tax: {'Taxed only' if f['tax'] == 'taxed' else 'Untaxed only'}")
     return " · ".join(parts)
+
+
+def _shift_year(value, delta):
+    """Shift a date by whole years, mapping Feb 29 to Feb 28 when needed."""
+    try:
+        return value.replace(year=value.year + delta)
+    except ValueError:
+        return value.replace(year=value.year + delta, day=28)
+
+
+def _pct_change(current, previous):
+    current = Decimal(str(current or 0))
+    previous = Decimal(str(previous or 0))
+    delta = current - previous
+    if not previous:
+        return None if not current else Decimal("100")
+    return (delta / abs(previous) * Decimal("100")).quantize(Decimal("0.1"))
+
+
+def compare_years(profile, filters=None) -> dict:
+    """Current period vs the same period one year earlier.
+
+    Returns ``{"current", "previous", "rows"}`` where rows is a 3-row
+    table (income/expenses/net) with ``current``, ``previous``,
+    ``delta`` and ``pct`` (None when not computable).
+    """
+    f = _coerce_filters(profile, filters=filters)
+    current = financial_summary(profile, filters=f)
+    prev_filters = dict(f)
+    prev_filters["year"] = None
+    prev_filters["start"] = _shift_year(current["start"], -1)
+    prev_filters["end"] = _shift_year(current["end"], -1)
+    previous = financial_summary(profile, filters=prev_filters)
+
+    def row(cur, prev):
+        return {"current": cur, "previous": prev, "delta": cur - prev,
+                "pct": _pct_change(cur, prev)}
+
+    return {
+        "current": current, "previous": previous,
+        "current_label": current["period_label"], "previous_label": previous["period_label"],
+        "rows": [
+            {"key": "income", "current": current["income_total"],
+             "previous": previous["income_total"],
+             "delta": current["income_total"] - previous["income_total"],
+             "pct": _pct_change(current["income_total"], previous["income_total"])},
+            {"key": "expenses", "current": current["expense_total"],
+             "previous": previous["expense_total"],
+             "delta": current["expense_total"] - previous["expense_total"],
+             "pct": _pct_change(current["expense_total"], previous["expense_total"])},
+            {"key": "net", "current": current["balance"],
+             "previous": previous["balance"],
+             "delta": current["balance"] - previous["balance"],
+             "pct": _pct_change(current["balance"], previous["balance"])},
+        ],
+    }
+
+
+def default_periods(year=None) -> list:
+    """Default reporting ranges: Q1-Q4 + H1-H2 for ``year`` (current year default)."""
+    import calendar
+
+    year = year or timezone.localdate().year
+
+    def month_end(m):
+        return calendar.monthrange(year, m)[1]
+
+    def rng(label, sm, sd, em, ed):
+        import datetime
+
+        return {"key": label,
+                "label": label,
+                "start": datetime.date(year, sm, sd),
+                "end": datetime.date(year, em, ed)}
+
+    return [
+        rng("Q1", 1, 1, 3, month_end(3)),
+        rng("Q2", 4, 1, 6, month_end(6)),
+        rng("Q3", 7, 1, 9, month_end(9)),
+        rng("Q4", 10, 1, 12, month_end(12)),
+        rng("H1", 1, 1, 6, month_end(6)),
+        rng("H2", 7, 1, 12, month_end(12)),
+    ]
+
+
+def period_comparison(profile, filters=None) -> dict:
+    """Per-period income/expenses split by tax flag plus net differences.
+
+    Uses the default trimester/semester ranges for the active year,
+    honoring farm/category/contact/document filters (tax filter is
+    ignored so both taxed and untaxed columns can be shown).
+    """
+    base = _coerce_filters(profile, filters=filters)
+    period = resolve_period(profile, base)
+    year = period["start"].year if period["start"].year == period["end"].year else None
+    if year is None:
+        year = timezone.localdate().year
+    rows = []
+    for spec in default_periods(year):
+        sub = dict(base)
+        sub["year"] = None
+        sub["start"], sub["end"] = spec["start"], spec["end"]
+        sub["tax"] = "all"
+        summary = financial_summary(profile, filters=sub)
+        income_taxed = summary["taxable_income"]
+        expense_taxed = summary["deductible_expenses"]
+        rows.append({
+            "label": spec["label"], "start": spec["start"], "end": spec["end"],
+            "income_total": summary["income_total"],
+            "income_taxed": income_taxed,
+            "income_untaxed": summary["income_total"] - income_taxed,
+            "expense_total": summary["expense_total"],
+            "expense_taxed": expense_taxed,
+            "expense_untaxed": summary["expense_total"] - expense_taxed,
+            "net": summary["balance"],
+            "taxable_net": summary["taxable_net"],
+        })
+    totals = {
+        key: sum((r[key] for r in rows[:4]), Decimal("0"))
+        for key in ("income_total", "income_taxed", "income_untaxed",
+                    "expense_total", "expense_taxed", "expense_untaxed",
+                    "net", "taxable_net")
+    }
+    return {"year": year, "rows": rows, "totals": totals}

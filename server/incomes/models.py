@@ -38,6 +38,11 @@ class Income(models.Model):
     class DocumentType(models.TextChoices):
         INVOICE = "invoice", "Invoice"
         RECEIPT = "receipt", "Receipt"
+
+    class Unit(models.TextChoices):
+        KG = "kg", "Kg"
+        TN = "tn", "Tn"
+        L = "l", "L"
     
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name="incomes", editable=False, help_text="Profile that owns this income.")
     farms = models.ManyToManyField(Farm, through="IncomeFarmAllocation", related_name="incomes", blank=True)
@@ -46,6 +51,9 @@ class Income(models.Model):
     title = models.CharField(max_length=150, help_text="Short description of the income.")
     description = models.TextField(blank=True, help_text="Additional details about the income.")
     amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Income amount.")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True, help_text="Optional quantity (informational).")
+    unit = models.CharField(max_length=2, choices=Unit.choices, blank=True, null=True, help_text="Optional quantity unit (informational).")
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True, help_text="Optional price per unit (informational).")
     date = models.DateField(default=timezone.localdate, help_text="Date on which the income was received.")
     document_type = models.CharField(max_length=10, choices=DocumentType.choices, help_text="Document supplied for this income.")
     include_in_tax = models.BooleanField(default=True, help_text="Include this income when calculating taxable income.")
@@ -62,6 +70,10 @@ class Income(models.Model):
             raise ValidationError({"category": "Category must belong to the same profile."})
         if self.customer_id and self.profile_id and self.customer.profile_id != self.profile_id:
             raise ValidationError({"customer": "Customer must belong to the same profile."})
+        if self.quantity is not None and self.quantity <= 0:
+            raise ValidationError({"quantity": "Quantity must be greater than zero."})
+        if self.unit_price is not None and self.unit_price <= 0:
+            raise ValidationError({"unit_price": "Unit price must be greater than zero."})
 
     def __str__(self) -> str:
         return f"{self.title} ({self.amount})"

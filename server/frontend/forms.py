@@ -108,7 +108,55 @@ def apply_greek_labels(form):
         if name == "tax" and isinstance(field, forms.ChoiceField):
             has_empty = any(not c[0] or c[0] == "all" for c in field.choices)
             field.choices = ([("all", "Όλα")] if has_empty else []) + [("taxed", "Μόνο με σήμανση"), ("untaxed", "Χωρίς σήμανση")]
+        if name == "preset" and isinstance(field, forms.ChoiceField):
+            field.choices = [("custom", "Custom / Χειροκίνητα"), ("today", "Σήμερα / Today"),
+                             ("last_30", "Τελευταίες 30 ημ. / Last 30 days"),
+                             ("month", "Μήνας / Month"), ("quarter", "Τρίμηνο / Quarter"),
+                             ("semester", "Εξάμηνο / Semester"), ("year", "Έτος / Year")]
+            field.label = "Περίοδος" if in_greek() else "Period"
     return form
+
+
+def preset_date_range(preset):
+    """Return (start, end) for a date preset, or (None, None) for custom."""
+    import calendar
+
+    today = timezone.localdate()
+    if preset == "today":
+        return today, today
+    if preset == "last_30":
+        return today - timezone.timedelta(days=29), today
+    if preset == "month":
+        last = calendar.monthrange(today.year, today.month)[1]
+        return today.replace(day=1), today.replace(day=last)
+    if preset == "quarter":
+        q = (today.month - 1) // 3
+        start_month = q * 3 + 1
+        end_month = start_month + 2
+        last = calendar.monthrange(today.year, end_month)[1]
+        return today.replace(month=start_month, day=1), today.replace(month=end_month, day=last)
+    if preset == "semester":
+        if today.month <= 6:
+            return today.replace(month=1, day=1), today.replace(month=6, day=30)
+        return today.replace(month=7, day=1), today.replace(month=12, day=31)
+    if preset == "year":
+        return today.replace(month=1, day=1), today.replace(month=12, day=31)
+    return None, None
+
+
+DATE_PRESET_CHOICES = [("custom", "Custom"), ("today", "Today"), ("last_30", "Last 30 days"),
+                       ("month", "Month"), ("quarter", "Quarter"),
+                       ("semester", "Semester"), ("year", "Year")]
+
+
+def apply_preset_to_cleaned(data):
+    """Override start/end from preset when a non-custom preset is chosen."""
+    preset = (data.get("preset") or "custom")
+    if preset and preset != "custom":
+        start, end = preset_date_range(preset)
+        if start and end:
+            data["start"], data["end"] = start, end
+    return data
 
 
 class LoginForm(AuthenticationForm):
@@ -223,13 +271,25 @@ class IncomeForm(OwnedForm):
 
     class Meta:
         model = Income
-        fields = ["title", "date", "amount", "category", "customer", "document_type", "include_in_tax", "is_archived", "description"]
+        fields = ["title", "date", "amount", "quantity", "unit", "unit_price",
+                  "category", "customer", "document_type", "include_in_tax", "is_archived", "description"]
         widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         profile = self.instance.profile
         self.fields["allocation_tree_type"].queryset = TreeType.objects.filter(profile=profile)
+        for name in ("quantity", "unit_price"):
+            self.fields[name].required = False
+        self.fields["unit"].required = False
+        self.fields["unit"].choices = [("", "—"), ("kg", "Kg"), ("tn", "Tn"), ("l", "L")]
+        self.fields["quantity"].help_text = "Optional, informational only."
+        self.fields["unit_price"].help_text = "Optional, informational only."
+        if in_greek():
+            self.fields["quantity"].label = "Ποσότητα (προαιρετικά)"
+            self.fields["unit"].label = "Μονάδα (προαιρετικά)"
+            self.fields["unit"].choices = [("", "—"), ("kg", "Κιλά"), ("tn", "Τόνοι"), ("l", "Λίτρα")]
+            self.fields["unit_price"].label = "Τιμή μονάδας (προαιρετικά)"
         if in_greek():
             self.fields["allocation_basis"].label = "Αυτόματη κατανομή"
             self.fields["allocation_basis"].choices = [
@@ -244,6 +304,11 @@ class IncomeForm(OwnedForm):
         data = super().clean()
         if data.get("allocation_basis") == "tree_type" and not data.get("allocation_tree_type"):
             raise ValidationError({"allocation_tree_type": "Διαλέξτε δέντρο/καλλιέργεια." if in_greek() else "Choose a tree/crop."})
+        for name in ("quantity", "unit_price"):
+            value = data.get(name)
+            if value is not None and value <= 0:
+                msg = "Εισάγετε τιμή μεγαλύτερη του μηδενός." if in_greek() else "Enter a value greater than zero."
+                raise ValidationError({name: msg})
         return data
 
 
@@ -437,6 +502,43 @@ class ProfileForm(forms.ModelForm):
         apply_greek_labels(self)
 
 
+class DropboxSettingsForm(forms.ModelForm):
+    class Meta:
+        model = Profile
+        fields = ["dropbox_app_key", "dropbox_app_secret"]
+        widgets = {
+            "dropbox_app_key": forms.TextInput(attrs={"autocomplete": "off"}),
+            "dropbox_app_secret": forms.PasswordInput(render_value=True, attrs={"autocomplete": "off"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.required = False
+        style_fields(self.fields)
+        if in_greek():
+            self.fields["dropbox_app_key"].label = "Dropbox App Key"
+            self.fields["dropbox_app_secret"].label = "Dropbox App Secret"
+            self.fields["dropbox_app_key"].help_text = "Από dropbox.com/developers → το app σου."
+            self.fields["dropbox_app_secret"].help_text = "Μυστικό κλειδί του app (αποθηκεύεται στον χώρο εργασίας)."
+        else:
+            self.fields["dropbox_app_key"].label = "Dropbox App Key"
+            self.fields["dropbox_app_secret"].label = "Dropbox App Secret"
+            self.fields["dropbox_app_key"].help_text = "From dropbox.com/developers → your app."
+            self.fields["dropbox_app_secret"].help_text = "App secret (stored in your workspace)."
+
+    def clean(self):
+        data = super().clean()
+        key = (data.get("dropbox_app_key") or "").strip()
+        secret = (data.get("dropbox_app_secret") or "").strip()
+        if bool(key) != bool(secret):
+            msg = "Συμπληρώστε και τα δύο πεδία (key + secret) ή κανένα." if in_greek() else "Fill both fields (key + secret) or neither."
+            raise ValidationError(msg)
+        data["dropbox_app_key"] = key
+        data["dropbox_app_secret"] = secret
+        return data
+
+
 class ProductionForm(OwnedForm):
     incomes = forms.ModelMultipleChoiceField(
         queryset=Income.objects.none(), required=False,
@@ -535,6 +637,7 @@ class ProductionFilterForm(forms.Form):
 
 class TransactionFilterForm(forms.Form):
     q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Search transactions…"}))
+    preset = forms.ChoiceField(required=False, label="Period", choices=DATE_PRESET_CHOICES, initial="custom")
     farm = forms.ModelChoiceField(queryset=Farm.objects.none(), required=False, empty_label="All farms")
     category = forms.ModelChoiceField(queryset=ExpenseCategory.objects.none(), required=False, empty_label="All categories")
     contact = forms.ModelChoiceField(queryset=Vendor.objects.none(), required=False, empty_label="All contacts")
@@ -581,6 +684,7 @@ class TransactionFilterForm(forms.Form):
 
     def clean(self):
         data = super().clean()
+        apply_preset_to_cleaned(data)
         if data.get("start") and data.get("end") and data["start"] > data["end"]:
             raise ValidationError("Η τελική ημερομηνία πρέπει να είναι ίδια ή μεταγενέστερη της αρχικής." if in_greek() else "The end date must be on or after the start date.")
         return data
@@ -588,6 +692,7 @@ class TransactionFilterForm(forms.Form):
 
 class TaskFilterForm(forms.Form):
     q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Search tasks…"}))
+    preset = forms.ChoiceField(required=False, label="Period", choices=DATE_PRESET_CHOICES, initial="custom")
     farm = forms.ModelChoiceField(queryset=Farm.objects.none(), required=False, empty_label="All farms")
     planting = forms.ModelChoiceField(queryset=TreePlanting.objects.none(), required=False, empty_label="All tree groups")
     category = forms.ModelChoiceField(queryset=TaskCategory.objects.none(), required=False, empty_label="All categories")
@@ -604,6 +709,7 @@ class TaskFilterForm(forms.Form):
 
     def clean(self):
         data = super().clean()
+        apply_preset_to_cleaned(data)
         if data.get("start") and data.get("end") and data["start"] > data["end"]:
             raise ValidationError("Η τελική ημερομηνία πρέπει να είναι ίδια ή μεταγενέστερη της αρχικής." if in_greek() else "The end date must be on or after the start date.")
         farm = data.get("farm")
@@ -616,6 +722,7 @@ class TaskFilterForm(forms.Form):
 class AnalyticsFilterForm(forms.Form):
     """Full-dimension filters shared by the analytics overview and reports."""
 
+    preset = forms.ChoiceField(required=False, label="Period", choices=DATE_PRESET_CHOICES, initial="custom")
     year = forms.ChoiceField(required=False, label="Year", choices=[])
     start = forms.DateField(required=False, label="From", widget=forms.DateInput(attrs={"type": "date"}))
     end = forms.DateField(required=False, label="To", widget=forms.DateInput(attrs={"type": "date"}))
@@ -662,6 +769,10 @@ class AnalyticsFilterForm(forms.Form):
 
     def clean(self):
         data = super().clean()
+        # Preset wins over manual dates; explicit year + custom preset keeps year logic.
+        if (data.get("preset") or "custom") != "custom":
+            apply_preset_to_cleaned(data)
+            data["year"] = None
         if data.get("start") and data.get("end") and data["start"] > data["end"]:
             raise ValidationError("Η τελική ημερομηνία πρέπει να είναι ίδια ή μεταγενέστερη της αρχικής." if in_greek() else "The end date must be on or after the start date.")
         return data

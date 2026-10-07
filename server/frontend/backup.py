@@ -111,6 +111,9 @@ def build_backup(profile) -> dict:
                      "category": income_category_idx[i.category_id],
                      "customer": customer_idx[i.customer_id] if i.customer_id else None,
                      "title": i.title, "description": i.description, "amount": str(i.amount),
+                      "quantity": str(i.quantity) if i.quantity is not None else None,
+                      "unit": i.unit or None,
+                      "unit_price": str(i.unit_price) if i.unit_price is not None else None,
                       "date": i.date.isoformat(), "document_type": i.document_type,
                       "include_in_tax": i.include_in_tax, "is_archived": i.is_archived}
                      for i in income_models.Income.objects.filter(profile=profile).order_by("pk")],
@@ -309,6 +312,9 @@ def restore_backup(profile, payload, mode="replace") -> dict:
             profile=profile, category=category, customer=customer,
             title=item.get("title", ""), description=item.get("description", ""),
             amount=item.get("amount", 0), date=item.get("date"),
+            quantity=item.get("quantity") or None,
+            unit=_checked_optional_unit(item.get("unit")),
+            unit_price=item.get("unit_price") or None,
             document_type=_checked_document(item.get("document_type"), "incomes"),
             include_in_tax=bool(item.get("include_in_tax", True)),
             is_archived=bool(item.get("is_archived", False)))
@@ -415,6 +421,15 @@ def _checked_unit(value):
     if value not in ("kg", "tn", "l"):
         raise BackupError("Backup item in 'productions' has an invalid unit.",
                           "Εγγραφή στην ενότητα 'productions' έχει μη έγκυρη μονάδα.")
+    return value
+
+
+def _checked_optional_unit(value):
+    if value in (None, ""):
+        return None
+    if value not in ("kg", "tn", "l"):
+        raise BackupError("Backup item in 'incomes' has an invalid unit.",
+                          "Εγγραφή στην ενότητα 'incomes' έχει μη έγκυρη μονάδα.")
     return value
 
 
