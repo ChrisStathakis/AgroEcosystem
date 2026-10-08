@@ -2,7 +2,7 @@
   "expo": {
     "name": "Agro",
     "slug": "agro-cell-phone",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "splash": {
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "com.agro.cellphone",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#244b3b"

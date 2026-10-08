@@ -16,7 +16,7 @@ build-apk.bat
 ```
 
 Output: `android\app\build\outputs\apk\release\app-release.apk`
-(v1.2.0, versionCode 3 — includes production schema v6 + analytics colors).
+(v1.3.0, versionCode 4 — includes production schema v6 + analytics colors).
 
 > Note: `release` currently uses the debug keystore (see
 > `android/app/build.gradle` signingConfigs). Good for sideload testing.
