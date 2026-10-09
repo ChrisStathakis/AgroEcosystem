@@ -1,0 +1,8 @@
+{% extends 'frontend/base.html' %}
+{% block title %}{% if editing %}Edit{% else %}Add{% endif %} home period{% endblock %}
+{% block breadcrumb %}Settings{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Back to settings</a>
+<div class="page-header"><div><h1>{% if editing %}Edit{% else %}Add{% endif %} home period</h1><p>Periods appear on the home page with income, expenses and tax difference. Months repeat every year.</p></div></div>
+<div class="row g-4"><div class="col-xl-8"><section class="panel form-panel"><h2 class="mb-1">Period details</h2><p class="small text-secondary mb-4">Fields marked * are required.</p><form method="post" novalidate>{% csrf_token %}{% include 'frontend/partials/fields.html' %}<div class="form-actions"><button class="btn btn-primary" type="submit">{% if editing %}Save changes{% else %}Create period{% endif %}</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Cancel</a></div></form></section></div></div>
+{% endblock %}

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 export type Lang = 'en' | 'el';
 
-let current: Lang = 'en';
+let current: Lang = 'el'; // Default to Greek on first launch.
 const listeners = new Set<() => void>();
 let loaded = false;
 
@@ -51,7 +51,7 @@ export async function loadLang(): Promise<Lang> {
       }
     }
   } catch {
-    // Keep default 'en' on any read/parse error.
+    // Keep default 'el' on any read/parse error.
   }
   loaded = true;
   for (const fn of listeners) fn();
@@ -416,6 +416,40 @@ const STRINGS: Record<string, { en: string; el: string }> = {
   set_replace_hint: { en: 'Replace wipes workspace first; merge keeps existing rows.', el: 'Η αντικατάσταση σβήνει πρώτα τον χώρο· η συγχώνευση κρατά τις υπάρχουσες γραμμές.' },
   set_danger: { en: 'Danger zone', el: 'Επικίνδυνη ζώνη' },
   set_mode: { en: 'Mode: ', el: 'Λειτουργία: ' },
+  // Dropbox manual sync (user presses upload/download, no auto-sync)
+  set_dropbox: { en: 'Dropbox sync', el: 'Συγχρονισμός Dropbox' },
+  set_dropbox_hint: { en: 'Manual upload/download of the same JSON backup. Fill App Key + Secret once, paste the refresh token from the desktop app after connecting.', el: 'Χειροκίνητο ανέβασμα/κατέβασμα του ίδιου JSON αντιγράφου. Βάλτε App Key + Secret μία φορά, επικολλήστε το refresh token από το desktop μετά τη σύνδεση.' },
+  dbx_app_key: { en: 'Dropbox App Key', el: 'Dropbox App Key' },
+  dbx_app_secret: { en: 'Dropbox App Secret', el: 'Dropbox App Secret' },
+  dbx_refresh: { en: 'Refresh token (from desktop)', el: 'Refresh token (από το desktop)' },
+  btn_dbx_save: { en: 'Save Dropbox settings', el: 'Αποθήκευση ρυθμίσεων Dropbox' },
+  btn_dbx_upload: { en: 'Upload to Dropbox', el: 'Ανέβασμα στο Dropbox' },
+  btn_dbx_list: { en: 'List Dropbox files', el: 'Λίστα αρχείων Dropbox' },
+  btn_dbx_download: { en: 'Download from Dropbox', el: 'Κατέβασμα από Dropbox' },
+  btn_dbx_disconnect: { en: 'Clear Dropbox token', el: 'Καθαρισμός token Dropbox' },
+  // Home-page periods (user-defined, max 6, managed in Settings)
+  set_periods: { en: 'Home periods', el: 'Περίοδοι αρχικής' },
+  set_periods_hint: { en: 'Periods shown on the home page with income, expenses and tax difference. Up to 6, months repeat every year.', el: 'Περίοδοι που φαίνονται στην αρχική με έσοδα, έξοδα και διαφορά εφορίας. Έως 6, οι μήνες επαναλαμβάνονται κάθε χρόνο.' },
+  period_name: { en: 'Name (e.g. Q1)', el: 'Όνομα (π.χ. Q1)' },
+  period_start_month: { en: 'Start month (1–12)', el: 'Αρχικός μήνας (1–12)' },
+  period_end_month: { en: 'End month (1–12)', el: 'Τελικός μήνας (1–12)' },
+  btn_period_add: { en: 'Add period', el: 'Προσθήκη περιόδου' },
+  btn_period_save: { en: 'Save period', el: 'Αποθήκευση περιόδου' },
+  btn_period_edit: { en: 'Edit', el: 'Επεξεργασία' },
+  btn_period_delete: { en: 'Delete', el: 'Διαγραφή' },
+  msg_period_saved: { en: 'Period saved.', el: 'Η περίοδος αποθηκεύτηκε.' },
+  msg_period_deleted: { en: 'Period deleted.', el: 'Η περίοδος διαγράφηκε.' },
+  msg_period_failed: { en: 'Period failed', el: 'Η περίοδος απέτυχε' },
+  msg_periods_full: { en: 'You already have 6 periods.', el: 'Έχετε ήδη 6 περιόδους.' },
+  home_periods: { en: 'Periods', el: 'Περίοδοι' },
+  home_periods_hint: { en: 'Income, expenses and tax difference per period.', el: 'Έσοδα, έξοδα και διαφορά εφορίας ανά περίοδο.' },
+  row_taxable_diff: { en: 'Tax diff.', el: 'Διαφ. εφορίας' },
+  msg_dbx_saved: { en: 'Dropbox settings saved.', el: 'Οι ρυθμίσεις Dropbox αποθηκεύτηκαν.' },
+  msg_dbx_uploaded: { en: 'Backup uploaded to Dropbox.', el: 'Το αντίγραφο ανέβηκε στο Dropbox.' },
+  msg_dbx_failed: { en: 'Dropbox sync failed', el: 'Ο συγχρονισμός Dropbox απέτυχε' },
+  msg_dbx_downloaded: { en: 'Backup downloaded. Choose a mode, then Restore.', el: 'Το αντίγραφο κατέβηκε. Διάλεξε λειτουργία και μετά Επαναφορά.' },
+  msg_dbx_no_files: { en: 'No backup files in Dropbox yet.', el: 'Δεν υπάρχουν ακόμα αρχεία αντιγράφων στο Dropbox.' },
+  ph_dbx_file: { en: 'Dropbox path, e.g. /AgroEcosystem/agro-backup-2026-10-08.json', el: 'Διαδρομή Dropbox, π.χ. /AgroEcosystem/agro-backup-2026-10-08.json' },
   // Misc rows
   row_cash_total: { en: 'Cash flow (running balance)', el: 'Ταμειακή ροή (τρέχον υπόλοιπο)' },
   row_taxable_income: { en: 'Taxable income', el: 'Φορολογητέο εισόδημα' },

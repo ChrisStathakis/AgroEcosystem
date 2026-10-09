@@ -1,0 +1,8 @@
+{% extends 'frontend_el/base_el.html' %}
+{% block title %}{% if editing %}Επεξεργασία{% else %}Προσθήκη{% endif %} περιόδου αρχικής{% endblock %}
+{% block breadcrumb %}Ρυθμίσεις{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Επιστροφή στις ρυθμίσεις</a>
+<div class="page-header"><div><h1>{% if editing %}Επεξεργασία{% else %}Προσθήκη{% endif %} περιόδου αρχικής</h1><p>Οι περίοδοι φαίνονται στην αρχική με έσοδα, έξοδα και διαφορά εφορίας. Οι μήνες επαναλαμβάνονται κάθε χρόνο.</p></div></div>
+<div class="row g-4"><div class="col-xl-8"><section class="panel form-panel"><h2 class="mb-1">Στοιχεία περιόδου</h2><p class="small text-secondary mb-4">Τα πεδία με * είναι υποχρεωτικά.</p><form method="post" novalidate>{% csrf_token %}{% include 'frontend_el/partials/fields_el.html' %}<div class="form-actions"><button class="btn btn-primary" type="submit">{% if editing %}Αποθήκευση αλλαγών{% else %}Δημιουργία περιόδου{% endif %}</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Ακύρωση</a></div></form></section></div></div>
+{% endblock %}

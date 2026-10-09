@@ -1,4 +1,4 @@
-// Current schema (v6). Ports Django constraints:
+// Current schema (v7). Ports Django constraints:
 // UNIQUE(profile,title/name), UNIQUE(farm,tree_type), PROTECT via
 // RESTRICT-equivalent checks in repositories (SQLite RESTRICT).
 // v4 adds is_archived to expenses/incomes (server 0004/0005):
@@ -8,8 +8,10 @@
 // adds productions + production_income_links (server production 0001).
 // v6 adds split_basis/split_tree_type to expenses (server expenses 0007):
 // shared (farm-less) expenses split by trees, one variety, stremmata or equal.
+// v7 adds home_periods: user-defined home-page periods (month ranges,
+// max 6, default Q1-Q4) for quarterly income/expense/tax summaries.
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const SCHEMA_V6 = `
 PRAGMA foreign_keys = ON;
 
@@ -198,9 +200,21 @@ CREATE TABLE IF NOT EXISTS production_income_links (
 );
 CREATE INDEX IF NOT EXISTS idx_production_links_production ON production_income_links(production_id);
 CREATE INDEX IF NOT EXISTS idx_production_links_income ON production_income_links(income_id);
+
+CREATE TABLE IF NOT EXISTS home_periods (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_month INTEGER NOT NULL CHECK (start_month BETWEEN 1 AND 12),
+  end_month INTEGER NOT NULL CHECK (end_month BETWEEN 1 AND 12),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(profile_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_home_periods_profile ON home_periods(profile_id);
 `;
 
-/** Back-compat aliases: older code imports SCHEMA_V3/V4/V5. */
+/** Back-compat aliases: older code imports SCHEMA_V3/V4/V5/V6. */
+export const SCHEMA_V7 = SCHEMA_V6;
 export const SCHEMA_V5 = SCHEMA_V6;
 export const SCHEMA_V4 = SCHEMA_V6;
 export const SCHEMA_V3 = SCHEMA_V6;

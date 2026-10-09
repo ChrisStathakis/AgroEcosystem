@@ -1,0 +1,24 @@
+site_name: AgroEcosystem — Οδηγός Χρήστη
+site_description: Οδηγός χρήσης της εφαρμογής AgroEcosystem στα Ελληνικά.
+site_author: Agro
+docs_dir: docs
+site_dir: docs-site
+# Όλα τα αρχεία flat .html, χωρίς φακέλους.
+use_directory_urls: false
+theme:
+  name: material
+  language: el
+markdown_extensions:
+  - admonition
+  - tables
+nav:
+  - Αρχική: index.md
+  - Εγκατάσταση: egkatastasi.md
+  - Πρώτα βήματα: prota-vimata.md
+  - Καθημερινή χρήση: kathimerini-xrisi.md
+  - Αρχική οθόνη & περίοδοι: arxiki.md
+  - Αναλύσεις & φίλτρα: analisi.md
+  - Αντίγραφα ασφαλείας: backup.md
+  - Σύνδεση Dropbox: dropbox.md
+  - Ρυθμίσεις: rythmiseis.md
+  - Συχνές ερωτήσεις: faq.md

@@ -171,6 +171,25 @@ export interface ProductionIncomeLink {
   income_amount?: number;
 }
 
+/** User-defined home-page period (month range, recurring every year, max 6). */
+export interface HomePeriod {
+  id: number;
+  profile_id: number;
+  name: string;
+  start_month: number; // 1-12
+  end_month: number; // 1-12, >= start_month
+  sort_order: number;
+}
+
+export const MAX_HOME_PERIODS = 6;
+
+export const DEFAULT_HOME_PERIODS: Array<{ name: string; start_month: number; end_month: number }> = [
+  { name: 'Q1', start_month: 1, end_month: 3 },
+  { name: 'Q2', start_month: 4, end_month: 6 },
+  { name: 'Q3', start_month: 7, end_month: 9 },
+  { name: 'Q4', start_month: 10, end_month: 12 },
+];
+
 export interface MonthlyRow {
   year?: number;
   month?: number;

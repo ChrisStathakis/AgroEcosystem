@@ -9,7 +9,7 @@ from expenses.models import Expense, ExpenseCategory, Vendor
 from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, TreePlanting, TreeType
 from incomes.models import Customer, Income, IncomeCategory, IncomeFarmAllocation
 from production.models import Production, ProductionIncomeLink
-from profiles.models import Profile
+from profiles.models import MAX_HOME_PERIODS, Profile
 
 
 def style_fields(fields):
@@ -536,6 +536,44 @@ class DropboxSettingsForm(forms.ModelForm):
             raise ValidationError(msg)
         data["dropbox_app_key"] = key
         data["dropbox_app_secret"] = secret
+        return data
+
+
+class HomePeriodForm(forms.ModelForm):
+    """User-defined home-page period (month range, max 6 per workspace)."""
+
+    class Meta:
+        from profiles.models import HomePeriod
+        model = HomePeriod
+        fields = ["name", "start_month", "end_month"]
+        widgets = {
+            "start_month": forms.NumberInput(attrs={"min": 1, "max": 12}),
+            "end_month": forms.NumberInput(attrs={"min": 1, "max": 12}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        style_fields(self.fields)
+        if in_greek():
+            self.fields["name"].label = "Όνομα (π.χ. Q1)"
+            self.fields["start_month"].label = "Αρχικός μήνας (1–12)"
+            self.fields["end_month"].label = "Τελικός μήνας (1–12)"
+        else:
+            self.fields["name"].label = "Name (e.g. Q1)"
+            self.fields["start_month"].label = "Start month (1–12)"
+            self.fields["end_month"].label = "End month (1–12)"
+
+    def clean(self):
+        data = super().clean()
+        start = data.get("start_month")
+        end = data.get("end_month")
+        if start is not None and not 1 <= start <= 12:
+            self.add_error("start_month", "Ο μήνας πρέπει να είναι 1–12." if in_greek() else "Month must be 1–12.")
+        if end is not None and not 1 <= end <= 12:
+            self.add_error("end_month", "Ο μήνας πρέπει να είναι 1–12." if in_greek() else "Month must be 1–12.")
+        if start is not None and end is not None and start > end:
+            raise ValidationError("Ο αρχικός μήνας πρέπει να είναι πριν ή ίσος με τον τελικό." if in_greek()
+                                  else "Start month must be on or before end month.")
         return data
 
 

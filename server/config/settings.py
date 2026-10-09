@@ -136,9 +136,11 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'login'
 
-# Dropbox manual backup upload (BYO app key via env).
-DROPBOX_APP_KEY = os.environ.get("DROPBOX_APP_KEY", "")
-DROPBOX_APP_SECRET = os.environ.get("DROPBOX_APP_SECRET", "")
+# Dropbox manual backup upload (BYO app key via env or per-workspace Settings).
+# Placeholders: leave empty until you paste your own app values from
+# https://www.dropbox.com/developers (scoped app: files.content.write/read).
+DROPBOX_APP_KEY = os.environ.get("DROPBOX_APP_KEY", "")  # e.g. "PASTE-YOUR-APP-KEY"
+DROPBOX_APP_SECRET = os.environ.get("DROPBOX_APP_SECRET", "")  # e.g. "PASTE-YOUR-APP-SECRET"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

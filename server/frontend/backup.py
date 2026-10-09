@@ -12,14 +12,15 @@ from farm.models import Farm, FarmTask, TaskCategory, TreeInventoryMovement, Tre
 from incomes import models as income_models
 from incomes.models import IncomeFarmAllocation
 from production.models import Production, ProductionIncomeLink
+from profiles.models import MAX_HOME_PERIODS
 
-BACKUP_VERSION = 5
+BACKUP_VERSION = 6
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 COLLECTIONS = (
     "expense_categories", "income_categories", "task_categories", "tree_types",
     "farms", "vendors", "customers", "tree_plantings", "tree_movements", "expenses", "incomes",
-    "tasks", "productions", "production_links",
+    "tasks", "productions", "production_links", "home_periods",
 )
 
 
@@ -49,6 +50,7 @@ def workspace_counts(profile) -> dict:
         "task_categories": TaskCategory.objects.filter(profile=profile).count(),
         "productions": Production.objects.filter(profile=profile).count(),
         "production_links": ProductionIncomeLink.objects.filter(profile=profile).count(),
+        "home_periods": profile.home_periods.count(),
     }
 
 
@@ -131,6 +133,9 @@ def build_backup(profile) -> dict:
                               "income": income_idx[link.income_id]}
                              for link in prod_links
                              if link.production_id in production_idx and link.income_id in income_idx],
+        "home_periods": [{"name": p.name, "start_month": p.start_month,
+                          "end_month": p.end_month, "sort_order": p.sort_order}
+                         for p in profile.home_periods.order_by("sort_order", "start_month", "pk")],
     }
 
 
@@ -152,6 +157,7 @@ def destroy_workspace(profile):
     TaskCategory.objects.filter(profile=profile).delete()
     TreeType.objects.filter(profile=profile).delete()
     Farm.objects.filter(profile=profile).delete()
+    profile.home_periods.all().delete()
 
 
 def _require_list(payload, key):
@@ -174,14 +180,16 @@ def describe_payload(payload) -> dict:
     if not isinstance(payload, dict):
         raise BackupError("This file is not a valid backup.",
                           "Αυτό το αρχείο δεν είναι έγκυρο αντίγραφο ασφαλείας.")
-    if payload.get("version") not in (1, 2, 3, 4, BACKUP_VERSION):
+    if payload.get("version") not in (1, 2, 3, 4, 5, BACKUP_VERSION):
         raise BackupError("This backup was made by an unsupported app version.",
                           "Αυτό το αντίγραφο έγινε από μη υποστηριζόμενη έκδοση.")
     counts = {}
     for key in COLLECTIONS:
-        if key == "tree_movements" and payload.get("version") not in (2, 3, 4, BACKUP_VERSION):
+        if key == "tree_movements" and payload.get("version") not in (2, 3, 4, 5, BACKUP_VERSION):
             counts[key] = 0
         elif key in ("productions", "production_links") and payload.get("version") in (1, 2, 3):
+            counts[key] = 0
+        elif key == "home_periods" and payload.get("version") in (1, 2, 3, 4, 5):
             counts[key] = 0
         else:
             counts[key] = len(_require_list(payload, key))
@@ -372,7 +380,7 @@ def restore_backup(profile, payload, mode="replace") -> dict:
     counts["tasks"] = created_tasks if mode == "merge" else len(_require_list(payload, "tasks"))
 
     productions = []
-    production_items = _require_list(payload, "productions") if payload.get("version") == BACKUP_VERSION else []
+    production_items = _require_list(payload, "productions") if payload.get("version") in (5, BACKUP_VERSION) else []
     for item in production_items:
         farm = _require_index(farms, item.get("farm"), "productions", "farm")
         tree_type = _require_index(tree_types, item.get("tree_type"), "productions", "tree_type")
@@ -390,7 +398,7 @@ def restore_backup(profile, payload, mode="replace") -> dict:
         production.save()
         productions.append(production)
 
-    link_items = _require_list(payload, "production_links") if payload.get("version") == BACKUP_VERSION else []
+    link_items = _require_list(payload, "production_links") if payload.get("version") in (5, BACKUP_VERSION) else []
     created_links = 0
     for item in link_items:
         production = _require_index(productions, item.get("production"), "production_links", "production")
@@ -407,6 +415,41 @@ def restore_backup(profile, payload, mode="replace") -> dict:
         created_links += 1
     counts["productions"] = len(productions) if mode == "replace" else len(production_items)
     counts["production_links"] = len(link_items) if mode == "replace" else created_links
+
+    period_items = _require_list(payload, "home_periods") if payload.get("version") == BACKUP_VERSION else []
+    created_periods = 0
+    for index, item in enumerate(period_items):
+        name = str(item.get("name", "")).strip()
+        start_month = item.get("start_month")
+        end_month = item.get("end_month")
+        if not name:
+            raise BackupError("Backup item in 'home_periods' is missing a name.",
+                              "Εγγραφή στην ενότητα 'home_periods' δεν έχει όνομα.")
+        if (not isinstance(start_month, int) or not isinstance(end_month, int)
+                or not 1 <= start_month <= 12 or not 1 <= end_month <= 12
+                or start_month > end_month):
+            raise BackupError("Backup item in 'home_periods' has invalid months.",
+                              "Εγγραφή στην ενότητα 'home_periods' έχει μη έγκυρους μήνες.")
+        existing = profile.home_periods.filter(name=name).first()
+        if existing is not None:
+            if mode == "replace":
+                existing.start_month = start_month
+                existing.end_month = end_month
+                existing.sort_order = item.get("sort_order", index)
+                existing.full_clean()
+                existing.save()
+                created_periods += 1
+            continue
+        if mode == "merge" and profile.home_periods.count() >= MAX_HOME_PERIODS:
+            raise BackupError(f"Backup has more than {MAX_HOME_PERIODS} home periods.",
+                              f"Το αντίγραφο έχει περισσότερες από {MAX_HOME_PERIODS} περιόδους.")
+        period = profile.home_periods.model(
+            profile=profile, name=name, start_month=start_month,
+            end_month=end_month, sort_order=item.get("sort_order", index))
+        period.full_clean()
+        period.save()
+        created_periods += 1
+    counts["home_periods"] = len(period_items) if mode == "replace" else created_periods
     return counts
 
 

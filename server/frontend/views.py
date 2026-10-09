@@ -232,6 +232,8 @@ def signup(request):
 
 @login_required
 def home(request):
+    from analytics.services import ensure_default_home_periods, home_period_summary
+
     profile = workspace(request)
     recent = list(Expense.objects.filter(profile=profile).select_related("farm")[:5]) + list(
         Income.objects.filter(profile=profile).prefetch_related("allocations__farm")[:5])
@@ -259,13 +261,21 @@ def home(request):
     last_task = FarmTask.objects.filter(profile=profile).order_by("-date").values_list("date", flat=True).first()
     tasks_stale = last_task is None or (today - last_task).days > 14
     task_count = FarmTask.objects.filter(profile=profile).count()
+    try:
+        period_year = int(request.GET.get("year", today.year))
+    except (TypeError, ValueError):
+        period_year = today.year
+    period_year = min(max(period_year, 2000), 2100)
+    period_defs = ensure_default_home_periods(profile)
+    home_periods = home_period_summary(profile, year=period_year, periods=period_defs) if period_defs else None
     return render(request, el_template(request, "frontend/home.html"), context_for(request, summary=localized_summary(request, financial_summary(profile)),
                   farm_count=Farm.objects.filter(profile=profile).count(), recent=transactions, profile=profile,
                   unpaid_total=unpaid_total, overdue_total=overdue_total,
                   unpaid_count=unpaid_qs.count(), overdue_count=overdue_qs.count(),
                   due_items=due_items, recent_tasks=recent_tasks,
                   recent_productions=recent_productions, unallocated_total=unallocated_total,
-                  unlinked_count=unlinked_count, tasks_stale=tasks_stale, task_count=task_count))
+                  unlinked_count=unlinked_count, tasks_stale=tasks_stale, task_count=task_count,
+                  home_periods=home_periods, period_year=period_year))
 
 
 @login_required
@@ -899,11 +909,21 @@ def profile_settings(request):
                                 "dropbox_refresh_token", "dropbox_account", "updated_at"])
         flash(request, "Dropbox settings saved.", "Οι ρυθμίσεις Dropbox αποθηκεύτηκαν.")
         return redirect("profile-settings")
+    dropbox_files: list[dict] = []
+    if bool(profile.dropbox_refresh_token):
+        try:
+            dropbox_files = dropbox_client.list_backups(profile)
+        except dropbox_client.DropboxError:
+            dropbox_files = []
+    from profiles.models import MAX_HOME_PERIODS
+    home_period_list = list(profile.home_periods.order_by("sort_order", "start_month", "pk"))
     return render(request, el_template(request, "frontend/profile.html"), context_for(
         request, "profile", form=form, profile=profile, dropbox_form=dropbox_form,
         dropbox_redirect_uri=_dropbox_redirect_uri(request),
         dropbox_configured=dropbox_client.is_configured(profile),
-        dropbox_connected=bool(profile.dropbox_refresh_token)))
+        dropbox_connected=bool(profile.dropbox_refresh_token),
+        dropbox_files=dropbox_files,
+        home_period_list=home_period_list, max_home_periods=MAX_HOME_PERIODS))
 
 
 class LocalizedLoginView(LoginView):
@@ -981,6 +1001,98 @@ def dropbox_upload(request):
     flash(request, f"Backup saved to Dropbox ({path}).",
           f"Το αντίγραφο αποθηκεύτηκε στο Dropbox ({path}).")
     return redirect("profile-settings")
+
+
+@login_required
+@require_http_methods(["POST"])
+def dropbox_download(request):
+    """Manual download: fetch a Dropbox backup into the restore preview."""
+    from . import dropbox as dropbox_client
+
+    profile = workspace(request)
+    try:
+        path = (request.POST.get("path") or "").strip()
+        payload = dropbox_client.download_backup(profile, path)
+        preview = workspace_backup.describe_payload(payload)
+    except dropbox_client.DropboxError as exc:
+        messages.error(request, exc.el_message if is_greek(request) else exc.en_message)
+        return redirect("profile-settings")
+    request.session["pending_backup"] = payload
+    form = forms.BackupUploadForm()
+    return render(request, el_template(request, "frontend/backup_restore.html"),
+                  context_for(request, "profile", form=form, preview=preview,
+                              counts=workspace_backup.workspace_counts(profile),
+                              dropbox_path=path))
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def home_period_create(request):
+    from profiles.models import MAX_HOME_PERIODS
+
+    profile = workspace(request)
+    if profile.home_periods.count() >= MAX_HOME_PERIODS and request.method == "GET":
+        messages.error(request, "Μπορείτε να κρατήσετε έως 6 περιόδους." if is_greek(request)
+                       else f"You can keep up to {MAX_HOME_PERIODS} periods.")
+        return redirect("profile-settings")
+    form = forms.HomePeriodForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST":
+        if profile.home_periods.count() >= MAX_HOME_PERIODS:
+            messages.error(request, "Μπορείτε να κρατήσετε έως 6 περιόδους." if is_greek(request)
+                           else f"You can keep up to {MAX_HOME_PERIODS} periods.")
+            return redirect("profile-settings")
+        if form.is_valid():
+            period = form.save(commit=False)
+            period.profile = profile
+            last = profile.home_periods.order_by("-sort_order").values_list("sort_order", flat=True).first()
+            period.sort_order = (last + 1) if last is not None else 0
+            try:
+                period.full_clean()
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                try:
+                    period.save()
+                except Exception:
+                    form.add_error("name", "Αυτό το όνομα υπάρχει ήδη." if is_greek(request)
+                                   else "This name already exists.")
+                else:
+                    flash(request, "Period saved.", "Η περίοδος αποθηκεύτηκε.")
+                    return redirect("profile-settings")
+    return render(request, el_template(request, "frontend/home_period_form.html"), context_for(
+        request, "profile", form=form, editing=False))
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def home_period_edit(request, pk):
+    profile = workspace(request)
+    period = get_object_or_404(profile.home_periods, pk=pk)
+    form = forms.HomePeriodForm(request.POST if request.method == "POST" else None, instance=period)
+    if request.method == "POST" and form.is_valid():
+        try:
+            form.save()
+        except Exception:
+            form.add_error("name", "Αυτό το όνομα υπάρχει ήδη." if is_greek(request)
+                           else "This name already exists.")
+        else:
+            flash(request, "Period saved.", "Η περίοδος αποθηκεύτηκε.")
+            return redirect("profile-settings")
+    return render(request, el_template(request, "frontend/home_period_form.html"), context_for(
+        request, "profile", form=form, editing=True, period=period))
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def home_period_delete(request, pk):
+    profile = workspace(request)
+    period = get_object_or_404(profile.home_periods, pk=pk)
+    if request.method == "POST":
+        period.delete()
+        flash(request, "Period deleted.", "Η περίοδος διαγράφηκε.")
+        return redirect("profile-settings")
+    return render(request, el_template(request, "frontend/home_period_delete.html"), context_for(
+        request, "profile", period=period))
 
 
 @login_required

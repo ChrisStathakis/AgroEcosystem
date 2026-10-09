@@ -9,8 +9,10 @@ from analytics.services import (
     category_breakdown,
     charts_payload,
     cumulative_balance,
+    ensure_default_home_periods,
     farm_profit,
     financial_summary,
+    home_period_summary,
 )
 from expenses.models import Expense, ExpenseCategory, Vendor
 from farm.models import Farm, TreeInventoryMovement, TreePlanting, TreeType
@@ -271,13 +273,15 @@ class WorkspaceBackupTests(TestCase):
     def test_backup_download_contains_only_own_data(self):
         import json
 
+        from .backup import BACKUP_VERSION
+
         user, profile, farm = make_full_workspace("owner")
         make_full_workspace("other")
         self.client.force_login(user)
         response = self.client.get("/el/workspace/backup/")
         self.assertEqual(response["Content-Type"], "application/json")
         payload = json.loads(response.content.decode())
-        self.assertEqual(payload["version"], 5)
+        self.assertEqual(payload["version"], BACKUP_VERSION)
         self.assertEqual(len(payload["farms"]), 1)
         self.assertEqual(payload["farms"][0]["title"], "North")
         self.assertEqual(len(payload["expenses"]), 1)
@@ -862,3 +866,67 @@ class SplitBasisTests(TestCase):
             "split_basis": "tree_type"})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Expense.objects.filter(profile=profile, title="Bad split").exists())
+
+
+class HomePeriodTests(TestCase):
+    def test_home_seeds_default_periods_for_fresh_workspace(self):
+        user = get_user_model().objects.create_user("fresh", password="pass12345")
+        self.client.force_login(user)
+        response = self.client.get("/el/")
+        self.assertEqual(response.status_code, 200)
+        rows = response.context["home_periods"]["rows"]
+        self.assertEqual([r["name"] for r in rows], ["Q1", "Q2", "Q3", "Q4"])
+        self.assertEqual(user.profile.home_periods.count(), 4)
+
+    def test_home_period_summary_totals(self):
+        import datetime
+
+        user, profile, north, expense_category, income_category = make_workspace()
+        year = timezone.localdate().year
+        Expense.objects.create(profile=profile, farm=north, category=expense_category,
+                               title="Seeds", amount="10.00", document_type="receipt",
+                               include_in_tax=True, date=datetime.date(year, 2, 5))
+        make_income(profile, income_category, Decimal("100.00"), "Harvest",
+                    farm=north, include_in_tax=True, date=datetime.date(year, 2, 10))
+        profile.home_periods.create(name="Q1", start_month=1, end_month=3, sort_order=0)
+        report = home_period_summary(profile, year=year)
+        self.assertEqual(len(report["rows"]), 1)
+        row = report["rows"][0]
+        self.assertEqual(row["income_total"], Decimal("100.00"))
+        self.assertEqual(row["expense_total"], Decimal("10.00"))
+        self.assertEqual(row["net"], Decimal("90.00"))
+        self.assertEqual(row["taxable_net"], Decimal("90.00"))
+
+    def test_period_crud_max_six(self):
+        from profiles.models import MAX_HOME_PERIODS
+
+        user, profile, _, _, _ = make_workspace("planner")
+        self.client.force_login(user)
+        for i in range(MAX_HOME_PERIODS):
+            response = self.client.post("/el/profile/periods/new/", {
+                "name": f"P{i}", "start_month": 1, "end_month": 12})
+            self.assertRedirects(response, "/profile/")
+        self.assertEqual(profile.home_periods.count(), MAX_HOME_PERIODS)
+        response = self.client.post("/el/profile/periods/new/", {
+            "name": "Extra", "start_month": 1, "end_month": 12})
+        self.assertRedirects(response, "/profile/")
+        self.assertEqual(profile.home_periods.count(), MAX_HOME_PERIODS)
+        period = profile.home_periods.get(name="P0")
+        response = self.client.post(f"/el/profile/periods/{period.pk}/edit/", {
+            "name": "Q1", "start_month": 1, "end_month": 3})
+        self.assertRedirects(response, "/profile/")
+        self.assertTrue(profile.home_periods.filter(name="Q1").exists())
+        response = self.client.post(f"/el/profile/periods/{period.pk}/delete/")
+        self.assertRedirects(response, "/profile/")
+        self.assertEqual(profile.home_periods.count(), MAX_HOME_PERIODS - 1)
+
+    def test_backup_round_trip_preserves_periods(self):
+        user, profile, _, _, _ = make_workspace("keeper")
+        profile.home_periods.create(name="Q1", start_month=1, end_month=3, sort_order=0)
+        payload = build_backup(profile)
+        self.assertEqual(len(payload["home_periods"]), 1)
+        destroy_workspace(profile)
+        self.assertEqual(profile.home_periods.count(), 0)
+        restore_backup(profile, payload, mode="replace")
+        period = profile.home_periods.get()
+        self.assertEqual((period.name, period.start_month, period.end_month), ("Q1", 1, 3))

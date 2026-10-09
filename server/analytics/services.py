@@ -770,3 +770,70 @@ def period_comparison(profile, filters=None) -> dict:
                     "net", "taxable_net")
     }
     return {"year": year, "rows": rows, "totals": totals}
+
+
+def ensure_default_home_periods(profile) -> list:
+    """Create the default Q1-Q4 periods for a fresh workspace (no data yet).
+
+    Only seeds when the workspace has no periods and no core data, so
+    deleting all periods sticks once the user has records.
+    """
+    from expenses.models import Expense
+    from farm.models import Farm, TreePlanting
+    from incomes.models import Income
+    from profiles.models import DEFAULT_HOME_PERIODS
+
+    existing = list(profile.home_periods.order_by("sort_order", "start_month", "pk"))
+    if existing:
+        return existing
+    has_data = (
+        Farm.objects.filter(profile=profile).exists()
+        or Expense.objects.filter(profile=profile).exists()
+        or Income.objects.filter(profile=profile).exists()
+        or TreePlanting.objects.filter(profile=profile).exists()
+    )
+    if has_data:
+        return existing
+    created = []
+    for order, (name, start_month, end_month) in enumerate(DEFAULT_HOME_PERIODS):
+        created.append(profile.home_periods.create(
+            name=name, start_month=start_month, end_month=end_month, sort_order=order))
+    return created
+
+
+def home_period_summary(profile, year=None, periods=None) -> dict:
+    """Per-period income/expenses/tax summary for the home page.
+
+    Each user-defined month-range period is resolved to concrete dates
+    for ``year`` (current year default) and summarized via
+    ``financial_summary``. Returns rows with net + taxable_net differences.
+    """
+    import calendar
+    import datetime
+
+    from profiles.models import DEFAULT_HOME_PERIODS
+
+    year = year or timezone.localdate().year
+    if periods is None:
+        periods = list(profile.home_periods.order_by("sort_order", "start_month", "pk"))
+    if not periods:
+        periods = [{"name": name, "start_month": sm, "end_month": em}
+                   for name, sm, em in DEFAULT_HOME_PERIODS]
+    rows = []
+    for spec in periods:
+        name = spec.name if hasattr(spec, "name") else spec["name"]
+        start_month = spec.start_month if hasattr(spec, "start_month") else spec["start_month"]
+        end_month = spec.end_month if hasattr(spec, "end_month") else spec["end_month"]
+        start = datetime.date(year, start_month, 1)
+        end = datetime.date(year, end_month, calendar.monthrange(year, end_month)[1])
+        summary = financial_summary(profile, filters={"start": start, "end": end, "tax": "all"})
+        rows.append({
+            "name": name, "start": start, "end": end,
+            "income_total": summary["income_total"],
+            "expense_total": summary["expense_total"],
+            "net": summary["balance"],
+            "taxable_income": summary["taxable_income"],
+            "deductible_expenses": summary["deductible_expenses"],
+            "taxable_net": summary["taxable_net"],
+        })
+    return {"year": year, "rows": rows}

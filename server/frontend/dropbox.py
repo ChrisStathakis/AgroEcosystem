@@ -15,7 +15,15 @@ from django.utils import timezone
 
 TOKEN_URL = "https://api.dropbox.com/oauth2/token"
 UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
+DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download"
+LIST_URL = "https://api.dropboxapi.com/2/files/list_folder"
 ACCOUNT_URL = "https://api.dropboxapi.com/2/users/get_current_account"
+
+# Placeholders: fill with your own app values (env DROPBOX_APP_KEY/SECRET
+# or per-workspace Settings). Keep empty until configured.
+PLACEHOLDER_APP_KEY = "PASTE-YOUR-APP-KEY"
+PLACEHOLDER_APP_SECRET = "PASTE-YOUR-APP-SECRET"
+DROPBOX_FOLDER = "/AgroEcosystem"
 
 
 class DropboxError(Exception):
@@ -127,7 +135,7 @@ def upload_backup(profile, payload: dict, filename: str | None = None) -> str:
     if filename is None:
         stamp = timezone.localdate().isoformat()
         filename = f"agro-backup-{stamp}.json"
-    path = f"/AgroEcosystem/{filename}"
+    path = f"{DROPBOX_FOLDER}/{filename}"
     body = json.dumps(payload, indent=2).encode("utf-8")
     arg = json.dumps({"path": path, "mode": "overwrite",
                       "autorename": False, "mute": True})
@@ -145,3 +153,50 @@ def upload_backup(profile, payload: dict, filename: str | None = None) -> str:
     profile.dropbox_last_sync = timezone.now()
     profile.save(update_fields=["dropbox_last_sync", "updated_at"])
     return path
+
+
+def list_backups(profile) -> list[dict]:
+    """List JSON backups in the Dropbox folder (manual download picker)."""
+    if not profile.dropbox_refresh_token:
+        raise DropboxError("Connect Dropbox first.", "Συνδέστε πρώτα το Dropbox.")
+    access = refresh_access_token(profile.dropbox_refresh_token, profile)
+    entries = _api_json(LIST_URL, access, {"path": DROPBOX_FOLDER, "recursive": False}).get("entries", [])
+    files = [
+        {"name": e.get("name", ""), "path": e.get("path_lower", ""),
+         "size": e.get("size", 0), "modified": e.get("server_modified", "")}
+        for e in entries
+        if e.get(".tag") == "file" and str(e.get("name", "")).endswith(".json")
+    ]
+    files.sort(key=lambda f: f["name"], reverse=True)
+    return files
+
+
+def download_backup(profile, path: str) -> dict:
+    """Download and parse a backup JSON file from Dropbox."""
+    from .backup import MAX_UPLOAD_BYTES, describe_payload
+
+    if not profile.dropbox_refresh_token:
+        raise DropboxError("Connect Dropbox first.", "Συνδέστε πρώτα το Dropbox.")
+    if not (path or "").strip():
+        raise DropboxError("Pick a Dropbox file first.", "Διαλέξτε πρώτα αρχείο Dropbox.")
+    access = refresh_access_token(profile.dropbox_refresh_token, profile)
+    req = urllib.request.Request(DOWNLOAD_URL, data=b"", headers={
+        "Authorization": f"Bearer {access}",
+        "Dropbox-API-Arg": json.dumps({"path": path.strip()}),
+    }, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8")
+    except Exception as error:
+        raise DropboxError(f"Dropbox download failed: {error}.",
+                           f"Το κατέβασμα από το Dropbox απέτυχε: {error}.") from error
+    if len(raw.encode("utf-8")) > MAX_UPLOAD_BYTES:
+        raise DropboxError("This file is too large (5 MB limit).",
+                           "Το αρχείο είναι πολύ μεγάλο (όριο 5 MB).")
+    try:
+        payload = json.loads(raw)
+    except ValueError as error:
+        raise DropboxError(f"This file is not a valid backup: {error}.",
+                           f"Αυτό το αρχείο δεν είναι έγκυρο αντίγραφο: {error}.") from error
+    describe_payload(payload)  # validate shape now, restore later
+    return payload

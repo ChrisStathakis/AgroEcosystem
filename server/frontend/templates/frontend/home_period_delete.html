@@ -1,0 +1,7 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Delete home period{% endblock %}
+{% block breadcrumb %}Settings{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Back to settings</a>
+<div class="row justify-content-center mt-4"><div class="col-lg-8 col-xl-6"><section class="panel form-panel"><span class="pill pill-warm mb-3">CONFIRM DELETION</span><h1 class="h3">Delete this period?</h1><p class="text-secondary">You are about to delete <strong class="text-dark">{{ period }}</strong>.</p><p class="small text-secondary">This action cannot be undone.</p><form method="post" class="form-actions">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete period</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Keep period</a></form></section></div></div>
+{% endblock %}

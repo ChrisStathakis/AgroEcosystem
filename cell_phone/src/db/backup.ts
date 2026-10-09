@@ -1,16 +1,16 @@
-// Port of server/frontend/backup.py (BACKUP_VERSION 5) to offline SQLite.
+// Port of server/frontend/backup.py (BACKUP_VERSION 6) to offline SQLite.
 // Everything is scoped to SINGLE_PROFILE_ID. Supports replace/merge,
-// legacy v1 (counts only), v2/v3 (no productions) and v4 (no split basis) payloads.
+// legacy v1 (counts only), v2/v3 (no productions) and v4/v5 (no home periods) payloads.
 import { getDb } from './client';
-import { nowISO, SINGLE_PROFILE_ID } from './types';
+import { MAX_HOME_PERIODS, nowISO, SINGLE_PROFILE_ID } from './types';
 
-export const BACKUP_VERSION = 5;
+export const BACKUP_VERSION = 6;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 export const COLLECTIONS = [
   'expense_categories', 'income_categories', 'task_categories', 'tree_types',
   'farms', 'vendors', 'customers', 'tree_plantings', 'tree_movements', 'expenses', 'incomes',
-  'tasks', 'productions', 'production_links',
+  'tasks', 'productions', 'production_links', 'home_periods',
 ] as const;
 
 export class BackupError extends Error {}
@@ -49,6 +49,7 @@ export async function workspaceCounts(): Promise<Record<string, number>> {
     task_categories: await count('task_categories'),
     productions: await count('productions'),
     production_links: await count('production_income_links'),
+    home_periods: await count('home_periods'),
   };
 }
 
@@ -88,6 +89,7 @@ export async function buildBackup(): Promise<any> {
   const productionIdx = new Map(productions.map((p: any, i: number) => [p.id, i]));
   const incomeIdx = new Map(incomes.map((i: any, idx: number) => [i.id, idx]));
   const prodLinks = await all<any>('SELECT * FROM production_income_links WHERE profile_id = ? ORDER BY id', [SINGLE_PROFILE_ID]);
+  const homePeriods = await all<any>('SELECT * FROM home_periods WHERE profile_id = ? ORDER BY sort_order, id', [SINGLE_PROFILE_ID]);
 
   return {
     version: BACKUP_VERSION,
@@ -140,16 +142,20 @@ export async function buildBackup(): Promise<any> {
     production_links: prodLinks
       .filter((l: any) => productionIdx.has(l.production_id) && incomeIdx.has(l.income_id))
       .map((l: any) => ({ production: productionIdx.get(l.production_id), income: incomeIdx.get(l.income_id) })),
+    home_periods: homePeriods.map((p: any, i: number) => ({
+      name: p.name, start_month: p.start_month, end_month: p.end_month, sort_order: p.sort_order ?? i,
+    })),
   };
 }
 
 export function describePayload(payload: any): Record<string, number> {
   if (!payload || typeof payload !== 'object') throw new BackupError('This file is not a valid backup.');
-  if (![1, 2, 3, 4, BACKUP_VERSION].includes(payload.version)) throw new BackupError('This backup was made by an unsupported app version.');
+  if (![1, 2, 3, 4, 5, BACKUP_VERSION].includes(payload.version)) throw new BackupError('This backup was made by an unsupported app version.');
   const counts: Record<string, number> = {};
   for (const key of COLLECTIONS) {
-    if (key === 'tree_movements' && ![2, 3, 4, BACKUP_VERSION].includes(payload.version)) counts[key] = 0;
+    if (key === 'tree_movements' && ![2, 3, 4, 5, BACKUP_VERSION].includes(payload.version)) counts[key] = 0;
     else if ((key === 'productions' || key === 'production_links') && [1, 2, 3].includes(payload.version)) counts[key] = 0;
+    else if (key === 'home_periods' && [1, 2, 3, 4, 5].includes(payload.version)) counts[key] = 0;
     else counts[key] = requireList(payload, key).length;
   }
   return counts;
@@ -174,7 +180,7 @@ export async function destroyWorkspace(): Promise<void> {
   const db = getDb();
   await db.withTransactionAsync(async () => {
     await db.execAsync('PRAGMA foreign_keys = OFF;');
-    for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
+    for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms', 'home_periods'] as const) {
       await db.runAsync(`DELETE FROM ${t} WHERE profile_id = ?`, [SINGLE_PROFILE_ID]);
     }
     await db.execAsync('PRAGMA foreign_keys = ON;');
@@ -203,7 +209,7 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
   const db = getDb();
   await db.withTransactionAsync(async () => {
     if (mode === 'replace') {
-      for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms'] as const) {
+      for (const t of ['farm_tasks', 'production_income_links', 'productions', 'expenses', 'incomes', 'income_farm_allocations', 'tree_inventory_movements', 'tree_plantings', 'vendors', 'customers', 'expense_categories', 'income_categories', 'task_categories', 'tree_types', 'farms', 'home_periods'] as const) {
         await db.runAsync(`DELETE FROM ${t} WHERE profile_id = ?`, [SINGLE_PROFILE_ID]);
       }
     }
@@ -387,7 +393,7 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
     counts.tasks = mode === 'merge' ? createdTasks : requireList(payload, 'tasks').length;
 
     const productions: any[] = [];
-    const productionItems: any[] = payload.version === BACKUP_VERSION ? requireList(payload, 'productions') : [];
+    const productionItems: any[] = [5, BACKUP_VERSION].includes(payload.version) ? requireList(payload, 'productions') : [];
     for (const item of productionItems) {
       const farm = requireIndex(farms, item.farm, 'productions', 'farm');
       const treeType = requireIndex(treeTypes, item.tree_type, 'productions', 'tree_type');
@@ -421,7 +427,7 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
         throw e;
       }
     }
-    const linkItems: any[] = payload.version === BACKUP_VERSION ? requireList(payload, 'production_links') : [];
+    const linkItems: any[] = [5, BACKUP_VERSION].includes(payload.version) ? requireList(payload, 'production_links') : [];
     let createdLinks = 0;
     for (const item of linkItems) {
       const production = requireIndex(productions, item.production, 'production_links', 'production');
@@ -442,6 +448,45 @@ export async function restoreBackup(payload: any, mode: 'replace' | 'merge' = 'r
     }
     counts.productions = mode === 'merge' ? productions.length : productionItems.length;
     counts.production_links = mode === 'merge' ? createdLinks : linkItems.length;
+
+    const periodItems: any[] = payload.version === BACKUP_VERSION ? requireList(payload, 'home_periods') : [];
+    let createdPeriods = 0;
+    for (let i = 0; i < periodItems.length; i++) {
+      const item = periodItems[i];
+      const name = String(item.name ?? '').trim();
+      const sm = Number(item.start_month);
+      const em = Number(item.end_month);
+      if (!name) throw new BackupError(`Backup item in 'home_periods' is missing a name.`);
+      if (!Number.isInteger(sm) || sm < 1 || sm > 12 || !Number.isInteger(em) || em < 1 || em > 12 || sm > em) {
+        throw new BackupError(`Backup item in 'home_periods' has invalid months.`);
+      }
+      const existing = await db.getFirstAsync<any>(
+        'SELECT * FROM home_periods WHERE profile_id = ? AND name = ?',
+        [SINGLE_PROFILE_ID, name],
+      );
+      if (existing) {
+        if (mode === 'replace') {
+          await db.runAsync('UPDATE home_periods SET start_month = ?, end_month = ?, sort_order = ? WHERE id = ?', [sm, em, item.sort_order ?? i, existing.id]);
+          createdPeriods += 1;
+        }
+        continue;
+      }
+      if (mode === 'merge') {
+        const total = await db.getFirstAsync<{ n: number }>(
+          'SELECT COUNT(*) AS n FROM home_periods WHERE profile_id = ?',
+          [SINGLE_PROFILE_ID],
+        );
+        if ((total?.n ?? 0) >= MAX_HOME_PERIODS) {
+          throw new BackupError(`Backup has more than ${MAX_HOME_PERIODS} home periods.`);
+        }
+      }
+      await db.runAsync(
+        'INSERT INTO home_periods (profile_id, name, start_month, end_month, sort_order) VALUES (?, ?, ?, ?, ?)',
+        [SINGLE_PROFILE_ID, name, sm, em, item.sort_order ?? i],
+      );
+      createdPeriods += 1;
+    }
+    counts.home_periods = mode === 'merge' ? createdPeriods : periodItems.length;
   });
   return counts;
 }

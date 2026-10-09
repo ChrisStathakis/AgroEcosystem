@@ -2,8 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { financialSummary, lastTaskDate, obligationsSummary, recentProductions, recentTasks, recentTransactions, unallocatedIncomeTotal, unlinkedProductionsCount } from '../db/repositories/analytics';
-import type { FinancialSummary } from '../db/types';
+import { financialSummary, homePeriodsSummary, lastTaskDate, obligationsSummary, recentProductions, recentTasks, recentTransactions, unallocatedIncomeTotal, unlinkedProductionsCount } from '../db/repositories/analytics';
+import { listHomePeriods } from '../db/repositories/homePeriods';
+import type { FinancialSummary, HomePeriod } from '../db/types';
+import type { HomePeriodSummaryRow } from '../db/repositories/analytics';
 import { HeroBalance, MonthlyChart, Stats } from '../components/panels';
 import { Screen } from './Screen';
 import { AppButton, Card, EmptyState, RowCard, SectionTitle, Skeleton } from '../components/ui';
@@ -20,6 +22,9 @@ export function OverviewScreen({ navigation }: any) {
   const [unallocated, setUnallocated] = useState(0);
   const [unlinked, setUnlinked] = useState(0);
   const [tasksStale, setTasksStale] = useState(false);
+  const [periodYear, setPeriodYear] = useState(new Date().getFullYear());
+  const [periodDefs, setPeriodDefs] = useState<HomePeriod[]>([]);
+  const [periodRows, setPeriodRows] = useState<HomePeriodSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const theme = useColors();
   useLang();
@@ -53,6 +58,24 @@ export function OverviewScreen({ navigation }: any) {
     }, []),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const defs = await listHomePeriods();
+          setPeriodDefs(defs);
+          if (defs.length > 0) {
+            setPeriodRows(await homePeriodsSummary(periodYear, defs));
+          } else {
+            setPeriodRows([]);
+          }
+        } catch {
+          setPeriodRows([]);
+        }
+      })();
+    }, [periodYear]),
+  );
+
   return (
     <View style={{ flex: 1 }}>
       <Screen title={`${t('overview')}${summary ? ` · ${summary.period_label}` : ''}`} subtitle={t('sub_overview')}>
@@ -67,6 +90,36 @@ export function OverviewScreen({ navigation }: any) {
             {summary && <HeroBalance balance={summary.balance} income={summary.income_total} expense={summary.expense_total} />}
             {summary && <Stats income={summary.income_total} expense={summary.expense_total} balance={summary.balance} />}
             {summary && <MonthlyChart monthly={summary.monthly.map((m) => ({ ...m, label: localizeMonthLabel(m.label) }))} />}
+
+            {periodDefs.length > 0 && (
+              <Card style={{ marginTop: 14 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ fontWeight: '800', color: theme.ink, fontSize: 15 }}>{t('home_periods')} · {periodYear}</Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <View style={{ minWidth: 64 }}>
+                      <AppButton title="‹" variant="secondary" onPress={() => setPeriodYear((y) => y - 1)} />
+                    </View>
+                    <View style={{ minWidth: 64 }}>
+                      <AppButton title="›" variant="secondary" onPress={() => setPeriodYear((y) => y + 1)} />
+                    </View>
+                  </View>
+                </View>
+                <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 8 }}>{t('home_periods_hint')}</Text>
+                {periodRows.map((r) => (
+                  <View key={r.period_id} style={{ paddingVertical: 7, borderTopWidth: 1, borderTopColor: theme.border }}>
+                    <Text style={{ fontWeight: '800', color: theme.ink, fontSize: 14 }}>
+                      {r.name} · {r.start.slice(5)}–{r.end.slice(5)}
+                    </Text>
+                    <Text style={{ color: theme.inkSoft, fontSize: 13, marginTop: 2 }}>
+                      {t('stat_income')} +{fmt(r.income_total)} · {t('stat_expenses')} −{fmt(r.expense_total)} · {t('stat_balance')} {fmt(r.net)}
+                    </Text>
+                    <Text style={{ color: r.taxable_net < 0 ? theme.danger : theme.success, fontSize: 13, fontWeight: '700' }}>
+                      {t('row_taxable_diff')} {fmt(r.taxable_net)}
+                    </Text>
+                  </View>
+                ))}
+              </Card>
+            )}
 
             {((obligations && (obligations.overdue_count > 0 || obligations.unpaid_count > 0)) || unallocated > 0.000001 || unlinked > 0) && (
               <Card>

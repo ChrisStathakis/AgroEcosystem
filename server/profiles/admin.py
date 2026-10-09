@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Profile
+from .models import HomePeriod, Profile
 
 
 @admin.register(Profile)
@@ -14,3 +14,9 @@ class ProfileAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return queryset
         return queryset.filter(user=request.user)
+
+
+@admin.register(HomePeriod)
+class HomePeriodAdmin(admin.ModelAdmin):
+    list_display = ("name", "profile", "start_month", "end_month", "sort_order")
+    list_filter = ("start_month", "end_month")

@@ -342,6 +342,51 @@ export async function financialSummary(yearOrFilters?: number | AnalyticsFilters
   };
 }
 
+export interface HomePeriodSummaryRow {
+  period_id: number;
+  name: string;
+  start: string;
+  end: string;
+  income_total: number;
+  expense_total: number;
+  net: number;
+  taxable_income: number;
+  deductible_expenses: number;
+  taxable_net: number;
+}
+
+/**
+ * Per-period income/expense/tax summary for the home page.
+ * Each user-defined month-range period is resolved to concrete dates
+ * for ``year`` and summarized via financialSummary.
+ */
+export async function homePeriodsSummary(
+  year: number,
+  periods: Array<{ id: number; name: string; start_month: number; end_month: number }>,
+): Promise<HomePeriodSummaryRow[]> {
+  const rows: HomePeriodSummaryRow[] = [];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  for (const p of periods) {
+    const lastDay = new Date(year, p.end_month, 0).getDate();
+    const start = `${year}-${pad(p.start_month)}-01`;
+    const end = `${year}-${pad(p.end_month)}-${pad(lastDay)}`;
+    const s = await financialSummary({ start, end });
+    rows.push({
+      period_id: p.id,
+      name: p.name,
+      start,
+      end,
+      income_total: s.income_total,
+      expense_total: s.expense_total,
+      net: s.balance,
+      taxable_income: s.taxable_income,
+      deductible_expenses: s.deductible_expenses,
+      taxable_net: s.taxable_net,
+    });
+  }
+  return rows;
+}
+
 export async function categoryBreakdown(
   filters: AnalyticsFilters = {},
   limit = 8,

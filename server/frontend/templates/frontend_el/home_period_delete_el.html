@@ -1,0 +1,7 @@
+{% extends 'frontend_el/base_el.html' %}
+{% block title %}Διαγραφή περιόδου αρχικής{% endblock %}
+{% block breadcrumb %}Ρυθμίσεις{% endblock %}
+{% block content %}
+<a class="small d-inline-block mb-3 text-decoration-none" href="{% url 'profile-settings' %}">← Επιστροφή στις ρυθμίσεις</a>
+<div class="row justify-content-center mt-4"><div class="col-lg-8 col-xl-6"><section class="panel form-panel"><span class="pill pill-warm mb-3">ΕΠΙΒΕΒΑΙΩΣΗ ΔΙΑΓΡΑΦΗΣ</span><h1 class="h3">Διαγραφή αυτής της περιόδου;</h1><p class="text-secondary">Πρόκειται να διαγράψετε την <strong class="text-dark">{{ period }}</strong>.</p><p class="small text-secondary">Αυτή η ενέργεια δεν αναιρείται.</p><form method="post" class="form-actions">{% csrf_token %}<button class="btn btn-danger" type="submit">Διαγραφή περιόδου</button><a class="btn btn-outline-secondary" href="{% url 'profile-settings' %}">Διατήρηση</a></form></section></div></div>
+{% endblock %}

@@ -1,0 +1,19 @@
+{
+  "name": "agroecosystem-docs",
+  "version": "1.0.0",
+  "description": "AgroEcosystem user guide (Greek) — offline docs viewer",
+  "main": "main.js",
+  "private": true,
+  "author": "Agro",
+  "scripts": {
+    "dev": "electron .",
+    "predist": "mkdocs build --strict -f ../mkdocs.yml",
+    "prepack": "mkdocs build --strict -f ../mkdocs.yml",
+    "dist": "electron-builder --win --x64 --publish never",
+    "pack": "electron-builder --win --dir --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0"
+  }
+}
